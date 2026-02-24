@@ -1,4 +1,3 @@
-use serialport;
 use std::{
     io::{Read, Write},
     thread,
