@@ -1,7 +1,7 @@
 use std::{
     io::{Read, Write},
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 mod dps150;
@@ -32,45 +32,54 @@ fn main() {
         thread::sleep(Duration::from_millis(50));
     }
 
-    // 2. Configuração de Trabalho
-    let setup = [
-        power_supply.set_float_value(193, 2.33), // 5V
-        power_supply.enable_output(true),        // Ligar
-    ];
+    // let pstate = power_supply.get_protection();
+    // port.write_all(&pstate).unwrap();
 
-    for cmd in setup {
-        port.write_all(&cmd).unwrap();
-        thread::sleep(Duration::from_millis(50));
-    }
+    // 2. Configuração de Trabalho
+    // let setup = [
+    //     power_supply.set_float_value(VOLTAGE_SET, 5.33), // 5V
+    //     power_supply.enable_output(false),        // Ligar
+    // ];
+
+    // for cmd in setup {
+    //     port.write_all(&cmd).unwrap();
+    //     thread::sleep(Duration::from_millis(50));
+    // }
 
     port.flush().unwrap();
     println!("Monitoramento Ativo.");
 
     let mut serial_buf = vec![0u8; 2048];
-    let mut last_poll = Instant::now();
+    // let mut last_poll = Instant::now();
 
-    loop {
-        // Polling a cada 1 segundo
-        if last_poll.elapsed() >= Duration::from_secs(1) {
-            let _ = port.write_all(&power_supply.get_all());
-            let _ = port.flush();
-            last_poll = Instant::now();
-        }
+    // Polling a cada 1 segundo
+    // if last_poll.elapsed() >= Duration::from_secs(1) {
+    //     //let _ = port.write_all(&power_supply.get_all());
+    //     let _ = port.flush();
+    //     last_poll = Instant::now();
+    // }
 
-        if let Ok(n) = port.read(&mut serial_buf) {
-            if n > 0 {
-                let updates = power_supply.push_serial_data(&serial_buf[..n]);
-                for state in updates {
-                    if let Some(v) = state.output_voltage {
-                        let i = state.output_current.unwrap_or(0.0);
-                        let temp = state.temperature.unwrap_or(0.0);
-                        println!("V: {:.2}V | A: {:.2}A | Temp: {:.1}ºC", v, i, temp);
-                    }
-                    if let Some(model) = state.model_name {
-                        println!("Conectado a: {}", model);
-                    }
-                }
+    // Pega a resposta da fonte, de acordo com o que foi pedido.
+    if let Ok(n) = port.read(&mut serial_buf)
+        && n > 0
+    {
+        let updates = power_supply.push_serial_data(&serial_buf[..n]);
+        for state in updates {
+            if let Some(model) = state.model_name.as_ref() {
+                println!("Model Name: {model}");
             }
+
+            if let Some(pstate) = state.protection_state.as_ref() {
+                println!("Protection State: {pstate}")
+            }
+            // if let Some(v) = state.output_voltage {
+            //     let i = state.output_current.unwrap_or(0.0);
+            //     let temp = state.temperature.unwrap_or(0.0);
+            //     println!("V: {:.2}V | A: {:.2}A | Temp: {:.1}ºC", v, i, temp);
+            // }
+            // if let Some(model) = state.model_name {
+            //     println!("Conectado a: {}", model);
+            // }
         }
     }
 }

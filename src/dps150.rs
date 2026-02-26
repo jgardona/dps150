@@ -1,4 +1,8 @@
 pub mod consts {
+    pub const PACKET_HEADER_SIZE: usize = 5; // bytes fixos antes do payload.
+    pub const BUFFER_MAX_SIZE: usize = 1024; // tamanho do buffer do protocolo.
+    pub const CHECKSUM_MODULUS: u32 = 0x100; // Modulo do checksum.
+
     pub const HEADER_INPUT: u8 = 0xf0; // 240
     pub const HEADER_OUTPUT: u8 = 0xf1; // 241
     pub const CMD_GET: u8 = 0xa1; // 161
@@ -7,7 +11,7 @@ pub mod consts {
     pub const CMD_XXX_192: u8 = 0xc0; // 192
     pub const CMD_XXX_193: u8 = 0xc1; // 193
 
-    // float
+    // floatc) as
     pub const VOLTAGE_SET: u8 = 193;
     pub const CURRENT_SET: u8 = 194;
     pub const GROUP1_VOLTAGE_SET: u8 = 197;
@@ -32,7 +36,7 @@ pub mod consts {
 
     pub const METERING_ENABLE: u8 = 216;
     pub const OUTPUT_ENABLE: u8 = 219;
-
+    pub const PROTECTION_STATE_DATA: u8 = 220; // tipos de proteção.
     // byte
     pub const BRIGHTNESS: u8 = 214;
     pub const VOLUME: u8 = 215;
@@ -42,6 +46,8 @@ pub mod consts {
 
     pub const ALL: u8 = 255;
 }
+use std::u8;
+
 use consts::*;
 
 #[derive(Debug, Default)]
@@ -67,8 +73,22 @@ pub struct DPSUpdate {
     pub g5_cset: Option<f32>,
     pub g6_vset: Option<f32>,
     pub g6_cset: Option<f32>,
-
+    pub ovp: Option<f32>,
+    pub ocp: Option<f32>,
+    pub opp: Option<f32>,
+    pub otp: Option<f32>,
+    pub lvp: Option<f32>,
+    pub brightness: Option<u8>,
+    pub volume: Option<u8>,
+    pub metering: Option<u8>,
+    pub output_capacity: Option<f32>,
+    pub output_energy: Option<f32>,
+    pub cc_cv: Option<u8>, // cc ou cv.
+    pub upper_limit_voltage: Option<f32>,
+    pub upper_limit_current: Option<f32>,
 }
+
+const PROTECTION_STATE: [&str; 7] = ["", "OVP", "OCP", "OPP", "OTP", "LVP", "REP"]; 
 
 pub struct DPS150 {
     buffer: Vec<u8>,
@@ -81,11 +101,15 @@ impl DPS150 {
 
     pub fn init_command(&self) -> Vec<Vec<u8>> {
         vec![
-            self.build_command(HEADER_OUTPUT, 0xc1, 0, &[1]), // Unlock
-            self.build_command(HEADER_OUTPUT, 0xb0, 0, &[5]), // Baudrate
-            self.build_command(HEADER_OUTPUT, CMD_GET, 222, &[]), // Model
-            self.get_all(),                                   // Full Data
+            self.build_command(HEADER_OUTPUT, CMD_XXX_193, 0, &[1]), // Unlock
+            self.build_command(HEADER_OUTPUT, CMD_XXX_176, 0, &[5]), // Baudrate
+            self.build_command(HEADER_OUTPUT, CMD_GET, MODEL_NAME, &[0]), // Model
+            //self.get_all(),                                   // Full Data
         ]
+    }
+
+    pub fn get_protection(&self) -> Vec<u8> {
+        self.build_command(HEADER_OUTPUT, CMD_GET, PROTECTION_STATE_DATA, &[0])
     }
 
     pub fn get_all(&self) -> Vec<u8> {
@@ -94,7 +118,7 @@ impl DPS150 {
 
     pub fn enable_output(&self, enable: bool) -> Vec<u8> {
         let val = if enable { 1 } else { 0 };
-        self.build_command(HEADER_OUTPUT, CMD_SET, 219, &[val])
+        self.build_command(HEADER_OUTPUT, CMD_SET, OUTPUT_ENABLE, &[val])
     }
 
     pub fn set_float_value(&self, type_id: u8, value: f32) -> Vec<u8> {
@@ -103,7 +127,7 @@ impl DPS150 {
     }
 
     fn build_command(&self, c1: u8, c2: u8, c3: u8, payload: &[u8]) -> Vec<u8> {
-        let mut packet = Vec::with_capacity(5 + payload.len());
+        let mut packet = Vec::with_capacity(PACKET_HEADER_SIZE + payload.len());
         packet.push(c1);
         packet.push(c2);
         packet.push(c3);
@@ -113,7 +137,7 @@ impl DPS150 {
             packet.push(byte);
             checksum += byte as u32;
         }
-        packet.push((checksum % 0x100) as u8);
+        packet.push((checksum % CHECKSUM_MODULUS) as u8);
         packet
     }
 
@@ -137,7 +161,7 @@ impl DPS150 {
                     let type_id = self.buffer[i + 2];
                     let len = self.buffer[i + 3] as usize;
 
-                    if i + 5 + len > self.buffer.len() {
+                    if i + PACKET_HEADER_SIZE + len > self.buffer.len() {
                         return updates; // Aguarda o resto do pacote
                     }
 
@@ -149,7 +173,7 @@ impl DPS150 {
 
                     if (calc_chk % 256) == received_chk as u32 {
                         let payload = &self.buffer[i + 4..i + 4 + len];
-                        if let Some(update) = Self::parse_data(type_id, payload) {
+                        if let Some(update) = self.parse_data(type_id, payload) {
                             updates.push(update);
                         }
                         self.buffer.drain(0..i + 5 + len);
@@ -160,7 +184,7 @@ impl DPS150 {
             }
 
             if !found_packet {
-                if self.buffer.len() > 1024 {
+                if self.buffer.len() > BUFFER_MAX_SIZE {
                     self.buffer.clear();
                 }
                 break;
@@ -169,28 +193,31 @@ impl DPS150 {
         updates
     }
 
-    fn parse_data(type_id: u8, payload: &[u8]) -> Option<DPSUpdate> {
+    fn parse_data(&self, type_id: u8, payload: &[u8]) -> Option<DPSUpdate> {
         let mut update = DPSUpdate::default();
         match type_id {
-            192 => update.input_voltage = Some(Self::read_float(payload, 0)),
+            192 => update.input_voltage = Some(self.read_float(payload, 0)),
             195 => {
-                update.output_voltage = Some(Self::read_float(payload, 0));
-                update.output_current = Some(Self::read_float(payload, 4));
-                update.output_power = Some(Self::read_float(payload, 8));
+                update.output_voltage = Some(self.read_float(payload, 0));
+                update.output_current = Some(self.read_float(payload, 4));
+                update.output_power = Some(self.read_float(payload, 8));
             }
-            196 => update.temperature = Some(Self::read_float(payload, 0)), // Temp Interna.
+            196 => update.temperature = Some(self.read_float(payload, 0)), // Temp Interna.
+            217 => update.output_capacity = Some(self.read_float(payload, 0)),
+            218 => update.output_energy = Some(self.read_float(payload, 0)),
+            220 => update.protection_state = Some(PROTECTION_STATE[payload[0] as usize].to_owned()),
             222 => update.model_name = Some(String::from_utf8_lossy(payload).into_owned()),
-            255 if payload.len() >= 135 => {
-                update.input_voltage = Some(Self::read_float(payload, 0));
-                update.output_voltage = Some(Self::read_float(payload, 12));
-                update.output_current = Some(Self::read_float(payload, 16));
+            255 => {
+                update.input_voltage = Some(self.read_float(payload, 0));
+                update.output_voltage = Some(self.read_float(payload, 12));
+                update.output_current = Some(self.read_float(payload, 16));
             }
             _ => return None,
         }
         Some(update)
     }
 
-    fn read_float(payload: &[u8], offset: usize) -> f32 {
+    fn read_float(&self, payload: &[u8], offset: usize) -> f32 {
         if offset + 4 > payload.len() {
             return 0.0;
         }
