@@ -7,6 +7,8 @@ use std::{
 mod dps150;
 use dps150::DPS150;
 
+use crate::dps150::DPSUpdate;
+
 fn main() {
     let port_name = "/dev/ttyACM0";
     let baud_rate = 115200;
@@ -29,7 +31,7 @@ fn main() {
     println!("Enviando comandos iniciais...");
     for cmd in power_supply.init_command() {
         port.write_all(&cmd).unwrap();
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(Duration::from_millis(100));
     }
 
     // let pstate = power_supply.get_protection();
@@ -60,26 +62,50 @@ fn main() {
     // }
 
     // Pega a resposta da fonte, de acordo com o que foi pedido.
-    if let Ok(n) = port.read(&mut serial_buf)
-        && n > 0
-    {
-        let updates = power_supply.push_serial_data(&serial_buf[..n]);
-        for state in updates {
-            if let Some(model) = state.model_name.as_ref() {
-                println!("Model Name: {model}");
+    loop {
+        if let Ok(n) = port.read(&mut serial_buf)
+            && n > 0
+        {
+            let updates = power_supply.push_serial_data(&serial_buf[..n]);
+            for state in updates {
+                select_data_to_print(state);
             }
-
-            if let Some(pstate) = state.protection_state.as_ref() {
-                println!("Protection State: {pstate}")
-            }
-            // if let Some(v) = state.output_voltage {
-            //     let i = state.output_current.unwrap_or(0.0);
-            //     let temp = state.temperature.unwrap_or(0.0);
-            //     println!("V: {:.2}V | A: {:.2}A | Temp: {:.1}ºC", v, i, temp);
-            // }
-            // if let Some(model) = state.model_name {
-            //     println!("Conectado a: {}", model);
-            // }
         }
+    }
+}
+
+fn select_data_to_print(state: DPSUpdate) {
+    if let Some(model) = state.model_name.as_ref() {
+        println!("Model Name: {model}");
+    }
+    if let Some(pstate) = state.protection_state.as_ref() {
+        println!("Protection State: {pstate}")
+    }
+    if let Some(v) = state.output_voltage {
+        println!("V: {:.2}V", v);
+    }
+    if let Some(c) = state.output_current {
+        println!("I: {:.2}A", c);
+    }
+    if let Some(t) = state.temperature {
+        println!("Temperature: {:.3} graus celsius.", t);
+    }
+    if let Some(fv) = state.firmware_version {
+        println!("The firmware version is {fv}.")
+    }
+    if let Some(hv) = state.hardware_version {
+        println!("The hardware version is {hv}.")
+    }
+    if let Some(p) = state.output_power {
+        println!("The dissipate power is {:.3}.", p);
+    }
+    if let Some(vset) = state.vset {
+        println!("The vset is : {:.3}.", vset);
+    }
+    if let Some(cset) = state.cset {
+        println!("The cset is : {:.3}.", cset);
+    }
+    if let Some(e) = state.output_energy {
+        println!("The output energy is {:.3} Wh.", e);
     }
 }
