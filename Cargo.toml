@@ -3,5 +3,21 @@ name = "dps150"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "tests"
+path = "src/tests.rs"
+
+[[bin]]
+name = "controller"
+path = "src/controller.rs"
+
 [dependencies]
-serialport = "4.3"
+serialport = "4.9.0"
+eframe = {version = "0.34.1", features = ["default"]}
+
+[profile.release]
+strip = true
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
