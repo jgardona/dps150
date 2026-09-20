@@ -1,7 +1,7 @@
 use std::{
     io::{Read, Write},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 mod dps150;
@@ -52,14 +52,8 @@ fn main() {
     println!("Monitoramento Ativo.");
 
     let mut serial_buf = vec![0u8; 2048];
-    // let mut last_poll = Instant::now();
-
-    // Polling a cada 1 segundo
-    // if last_poll.elapsed() >= Duration::from_secs(1) {
-    //     //let _ = port.write_all(&power_supply.get_all());
-    //     let _ = port.flush();
-    //     last_poll = Instant::now();
-    // }
+    let mut last_poll = Instant::now();
+    let poll_interval = Duration::from_millis(100);
 
     // Pega a resposta da fonte, de acordo com o que foi pedido.
     loop {
@@ -70,6 +64,11 @@ fn main() {
             for state in updates {
                 select_data_to_print(state);
             }
+        }
+
+        if last_poll.elapsed() >= poll_interval {
+            let _ = port.write_all(&power_supply.get_all());
+            last_poll = Instant::now();
         }
     }
 }
@@ -108,4 +107,7 @@ fn select_data_to_print(state: DPSUpdate) {
     if let Some(e) = state.output_energy {
         println!("The output energy is {:.3} Wh.", e);
     }
+
+    let run_state = state.output_opened.unwrap_or(false);
+    println!("Output Closed? {run_state}");
 }
