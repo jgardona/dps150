@@ -13,7 +13,7 @@ path = "src/controller.rs"
 
 [dependencies]
 serialport = "4.9.0"
-eframe = {version = "0.34.1", features = ["default"]}
+eframe = { version = "0.34.1", features = ["default"] }
 
 [profile.release]
 strip = true

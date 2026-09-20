@@ -26,7 +26,7 @@ pub mod commands {
     pub const GROUP5_VOLTAGE_SET: u8 = 205;
     pub const GROUP5_CURRENT_SET: u8 = 206;
     pub const GROUP6_VOLTAGE_SET: u8 = 207;
-    pub const GROUP7_CURRENT_SET: u8 = 208;
+    pub const GROUP6_CURRENT_SET: u8 = 208;
 
     // Proteções.
     pub const OVP: u8 = 209;
@@ -93,7 +93,7 @@ pub struct DPSUpdate {
     pub cc_cv: Option<String>, // cc ou cv.
     pub upper_limit_voltage: Option<f32>,
     pub upper_limit_current: Option<f32>,
-    pub output_closed: bool,
+    pub output_opened: Option<bool>,
     pub firmware_version: Option<String>,
     pub hardware_version: Option<String>,
 }
@@ -118,6 +118,7 @@ impl DPS150 {
             self.build_command(HEADER_OUTPUT, CMD_GET, MODEL_NAME, &[0]), // Model name.
             self.build_command(HEADER_OUTPUT, CMD_GET, HARDWARE_VERSION, &[0]), // Get hardware version.
             self.build_command(HEADER_OUTPUT, CMD_GET, FIRMWARE_VERSION, &[0]),
+            self.build_command(HEADER_OUTPUT, CMD_SET, OUTPUT_ENABLE, &[0]),
             self.get_all(),
         ]
     }
@@ -128,6 +129,36 @@ impl DPS150 {
 
     pub fn get_all(&self) -> Vec<u8> {
         self.build_command(HEADER_OUTPUT, CMD_GET, ALL, &[0])
+    }
+
+    pub fn lock_session(&self) -> Vec<u8> {
+        self.build_command(HEADER_OUTPUT, CMD_SESSION, 0, &[0])
+    }
+
+    /// Type_id do comando SET de tensão para o grupo de memória `n` (1..6).
+    pub fn group_voltage_id(n: u8) -> Option<u8> {
+        match n {
+            1 => Some(GROUP1_VOLTAGE_SET),
+            2 => Some(GROUP2_VOLTAGE_SET),
+            3 => Some(GROUP3_VOLTAGE_SET),
+            4 => Some(GROUP4_VOLTAGE_SET),
+            5 => Some(GROUP5_VOLTAGE_SET),
+            6 => Some(GROUP6_VOLTAGE_SET),
+            _ => None,
+        }
+    }
+
+    /// Type_id do comando SET de corrente para o grupo de memória `n` (1..6).
+    pub fn group_current_id(n: u8) -> Option<u8> {
+        match n {
+            1 => Some(GROUP1_CURRENT_SET),
+            2 => Some(GROUP2_CURRENT_SET),
+            3 => Some(GROUP3_CURRENT_SET),
+            4 => Some(GROUP4_CURRENT_SET),
+            5 => Some(GROUP5_CURRENT_SET),
+            6 => Some(GROUP6_CURRENT_SET),
+            _ => None,
+        }
     }
 
     pub fn enable_output(&self, enable: bool) -> Vec<u8> {
@@ -170,7 +201,7 @@ impl DPS150 {
 
             let mut found_packet = false;
             // Range exclusivo (..) evita tentar acessar index 0 em buffer vazio
-            for i in 0..self.buffer.len().saturating_sub(5) {
+            for i in 0..self.buffer.len().saturating_sub(4) {
                 if self.buffer[i] == HEADER_INPUT && self.buffer[i + 1] == CMD_GET {
                     let type_id = self.buffer[i + 2];
                     let len = self.buffer[i + 3] as usize;
@@ -210,64 +241,87 @@ impl DPS150 {
     fn parse_data(&self, type_id: u8, payload: &[u8]) -> Option<DPSUpdate> {
         let mut update = DPSUpdate::default();
         match type_id {
-            192 => update.input_voltage = Some(self.read_float(payload, 0)),
+            192 => update.input_voltage = self.read_float(payload, 0),
+            193 => update.vset = self.read_float(payload, 0),
+            194 => update.cset = self.read_float(payload, 0),
             195 => {
-                update.output_voltage = Some(self.read_float(payload, 0));
-                update.output_current = Some(self.read_float(payload, 4));
-                update.output_power = Some(self.read_float(payload, 8));
+                update.output_voltage = self.read_float(payload, 0);
+                update.output_current = self.read_float(payload, 4);
+                update.output_power = self.read_float(payload, 8);
             }
-            196 => update.temperature = Some(self.read_float(payload, 0)), // Temp Interna.
-            217 => update.output_capacity = Some(self.read_float(payload, 0)),
-            218 => update.output_energy = Some(self.read_float(payload, 0)),
-            219 => update.output_closed = payload[0] == 1,
+            196 => update.temperature = self.read_float(payload, 0), // Temp Interna.
+            217 => update.output_capacity = self.read_float(payload, 0),
+            218 => update.output_energy = self.read_float(payload, 0),
+            219 => update.output_opened = payload.first().map(|&b| b == 0),
             220 => {
-                update.protection_state =
-                    Some(PROTECTION_STATE_LABELS[payload[0] as usize].to_owned())
+                update.protection_state = payload
+                    .first()
+                    .and_then(|&b| PROTECTION_STATE_LABELS.get(b as usize))
+                    .map(|s| s.to_string())
             }
-            221 => update.cc_cv = Some(CC_CV_LABELS[payload[0] as usize].to_owned()),
+            221 => {
+                update.cc_cv = payload
+                    .first()
+                    .and_then(|&b| CC_CV_LABELS.get(b as usize))
+                    .map(|s| s.to_string())
+            }
             222 => update.model_name = Some(String::from_utf8_lossy(payload).into_owned()),
             223 => update.hardware_version = Some(String::from_utf8_lossy(payload).into_owned()),
             224 => update.firmware_version = Some(String::from_utf8_lossy(payload).into_owned()),
             255 => {
-                update.input_voltage = Some(self.read_float(payload, 0));
-                update.vset = Some(self.read_float(payload, 4));
-                update.cset = Some(self.read_float(payload, 8));
-                update.output_voltage = Some(self.read_float(payload, 12));
-                update.output_current = Some(self.read_float(payload, 16));
-                update.output_power = Some(self.read_float(payload, 20));
-                update.temperature = Some(self.read_float(payload, 24));
-                update.g1_vset = Some(self.read_float(payload, 28));
-                update.g1_cset = Some(self.read_float(payload, 32));
-                update.g2_vset = Some(self.read_float(payload, 36));
-                update.g2_cset = Some(self.read_float(payload, 40));
-                update.g3_vset = Some(self.read_float(payload, 44));
-                update.g3_cset = Some(self.read_float(payload, 48));
-                update.g4_vset = Some(self.read_float(payload, 52));
-                update.g4_cset = Some(self.read_float(payload, 56));
-                update.g5_vset = Some(self.read_float(payload, 60));
-                update.g5_cset = Some(self.read_float(payload, 64));
-                update.g6_vset = Some(self.read_float(payload, 68));
-                update.g6_cset = Some(self.read_float(payload, 72));
-                update.ovp = Some(self.read_float(payload, 76));
-                update.ocp = Some(self.read_float(payload, 80));
-                update.opp = Some(self.read_float(payload, 84));
-                update.otp = Some(self.read_float(payload, 88));
-                update.lvp = Some(self.read_float(payload, 82))
-
-                // TODO: precisa implementar todos os dados aqui.
+                update.input_voltage = self.read_float(payload, 0);
+                update.vset = self.read_float(payload, 4);
+                update.cset = self.read_float(payload, 8);
+                update.output_voltage = self.read_float(payload, 12);
+                update.output_current = self.read_float(payload, 16);
+                update.output_power = self.read_float(payload, 20);
+                update.temperature = self.read_float(payload, 24);
+                update.g1_vset = self.read_float(payload, 28);
+                update.g1_cset = self.read_float(payload, 32);
+                update.g2_vset = self.read_float(payload, 36);
+                update.g2_cset = self.read_float(payload, 40);
+                update.g3_vset = self.read_float(payload, 44);
+                update.g3_cset = self.read_float(payload, 48);
+                update.g4_vset = self.read_float(payload, 52);
+                update.g4_cset = self.read_float(payload, 56);
+                update.g5_vset = self.read_float(payload, 60);
+                update.g5_cset = self.read_float(payload, 64);
+                update.g6_vset = self.read_float(payload, 68);
+                update.g6_cset = self.read_float(payload, 72);
+                update.ovp = self.read_float(payload, 76);
+                update.ocp = self.read_float(payload, 80);
+                update.opp = self.read_float(payload, 84);
+                update.otp = self.read_float(payload, 88);
+                update.lvp = self.read_float(payload, 92);
+                update.brightness = payload.get(96).copied();
+                update.volume = payload.get(97).copied();
+                update.metering = payload.get(98).copied();
+                update.output_capacity = self.read_float(payload, 99);
+                update.output_energy = self.read_float(payload, 103);
+                update.output_opened = payload.get(107).map(|&b| b == 0);
+                update.protection_state = payload
+                    .get(108)
+                    .and_then(|&b| PROTECTION_STATE_LABELS.get(b as usize))
+                    .map(|s| s.to_string());
+                update.cc_cv = payload
+                    .get(109)
+                    .and_then(|&b| CC_CV_LABELS.get(b as usize))
+                    .map(|s| s.to_string());
+                update.upper_limit_voltage = self.read_float(payload, 111);
+                update.upper_limit_current = self.read_float(payload, 115);
+                // Offsets 119, 123, 127, 131 e 135 (floats) existem no payload mas seu
+                // significado ainda não foi identificado (nem na implementação de
+                // referência em JS que documentou este layout).
             }
-            226 => update.upper_limit_voltage = Some(self.read_float(payload, 0)),
-            227 => update.upper_limit_current = Some(self.read_float(payload, 0)),
+            226 => update.upper_limit_voltage = self.read_float(payload, 0),
+            227 => update.upper_limit_current = self.read_float(payload, 0),
             _ => return None,
         }
         Some(update)
     }
 
-    fn read_float(&self, payload: &[u8], offset: usize) -> f32 {
-        if offset + 4 > payload.len() {
-            return 0.0;
-        }
-        let bytes: [u8; 4] = payload[offset..offset + 4].try_into().unwrap_or([0; 4]);
-        f32::from_le_bytes(bytes)
+    fn read_float(&self, payload: &[u8], offset: usize) -> Option<f32> {
+        let bytes: [u8; 4] = payload.get(offset..offset + 4)?.try_into().ok()?;
+        Some(f32::from_le_bytes(bytes))
     }
 }
