@@ -298,7 +298,11 @@ impl AppModel {
                             .selected_text(selected_text)
                             .show_ui(ui, |ui| {
                                 for port in self.available_ports.clone() {
-                                    ui.selectable_value(&mut self.selected_port, port.clone(), port);
+                                    ui.selectable_value(
+                                        &mut self.selected_port,
+                                        port.clone(),
+                                        port,
+                                    );
                                 }
                             });
                     });
@@ -310,9 +314,7 @@ impl AppModel {
                         ConnectionState::Connecting => {
                             ("Connecting...", Color32::from_rgb(230, 180, 40))
                         }
-                        ConnectionState::Connected => {
-                            ("Connected", Color32::from_rgb(60, 200, 90))
-                        }
+                        ConnectionState::Connected => ("Connected", Color32::from_rgb(60, 200, 90)),
                     };
                     if ui
                         .add(
@@ -386,10 +388,8 @@ impl AppModel {
             if ui
                 .add_sized(
                     [w, h],
-                    egui::Button::new(
-                        egui::RichText::new("OK").color(Color32::BLACK).strong(),
-                    )
-                    .fill(Color32::from_rgb(60, 200, 90)),
+                    egui::Button::new(egui::RichText::new("OK").color(Color32::BLACK).strong())
+                        .fill(Color32::from_rgb(60, 200, 90)),
                 )
                 .clicked()
             {
@@ -417,15 +417,16 @@ impl AppModel {
                         }
                     });
                 if ui
-                    .button(
-                        egui::RichText::new("Save")
-                            .color(Color32::BLACK)
-                            .strong()
-                            .size(11.0),
+                    .add_sized(
+                        [ui.available_width(), 20.0],
+                        egui::Button::new(
+                            egui::RichText::new("Save")
+                                .color(Color32::LIGHT_GRAY)
+                                .strong()
+                                .size(11.0),
+                        ),
                     )
-                    .on_hover_text(format!(
-                        "Salvar Vset/Iset atual em M{target_profile}"
-                    ))
+                    .on_hover_text(format!("Salvar Vset/Iset atual em M{target_profile}"))
                     .clicked()
                 {
                     self.save_profile(target_profile);
@@ -675,10 +676,8 @@ fn draw_bar_chart_icon(ui: &mut egui::Ui) {
     for (i, h) in heights.iter().enumerate() {
         let bar_h = rect.height() * h;
         let x = rect.left() + (i as f32) * bar_w * 1.3;
-        let bar = egui::Rect::from_min_size(
-            Pos2::new(x, rect.bottom() - bar_h),
-            Vec2::new(bar_w, bar_h),
-        );
+        let bar =
+            egui::Rect::from_min_size(Pos2::new(x, rect.bottom() - bar_h), Vec2::new(bar_w, bar_h));
         painter.rect_filled(bar, 1.0, Color32::LIGHT_GRAY);
     }
     ui.add_space(6.0);
@@ -775,9 +774,12 @@ fn serial_thread_main(
     }
 }
 
+const WIDTH: f32 = 560.0;
+const HEIGHT: f32 = 480.0;
+
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([560.0, 360.0]),
+        viewport: egui::ViewportBuilder::default().with_inner_size([WIDTH, HEIGHT]),
         ..Default::default()
     };
 
