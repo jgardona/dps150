@@ -51,12 +51,18 @@ struct AppModel {
     run_start: Option<Instant>,
     frozen_elapsed: Duration,
 
-    last_applied_profile: Option<u8>,
+    /// Campos de edição alterados e ainda não enviados ao aparelho.
+    setpoint_dirty: bool,
+    /// Grupo de memória (1..6) selecionado; alvo do "Salvar".
+    selected_profile: u8,
 
     /// Intervalo (ms) entre leituras do dispositivo e amostras do gráfico.
     update_ms: u64,
     history: VecDeque<Sample>,
     last_sample: Option<Instant>,
+
+    /// Cores de V, A e W (nesta ordem), escolhidas pela legenda do gráfico.
+    series_colors: [Color32; 3],
 }
 
 /// Uma amostra de tensão/corrente/potência para o gráfico.
@@ -68,14 +74,25 @@ struct Sample {
 }
 
 const HISTORY_LEN: usize = 300;
-/// Largura da coluna de leituras (V/A/W, setpoints, conexão).
-const LEFT_COLUMN_WIDTH: f32 = 300.0;
-/// Fração do espaço à direita das leituras ocupada pelos botões (o resto é do gráfico).
-const BUTTONS_SHARE: f32 = 0.4;
+/// Fração da largura ocupada pela coluna de controle (o resto é do gráfico).
+const CONTROL_SHARE: f32 = 0.36;
+const CONTROL_MIN_WIDTH: f32 = 330.0;
+const CONTROL_MAX_WIDTH: f32 = 440.0;
 const UPDATE_MS_RANGE: std::ops::RangeInclusive<u64> = 100..=1000;
-const CHART_VOLTAGE_COLOR: Color32 = Color32::from_rgb(230, 60, 60);
-const CHART_CURRENT_COLOR: Color32 = Color32::from_rgb(60, 200, 90);
-const CHART_POWER_COLOR: Color32 = Color32::from_rgb(60, 140, 255);
+/// Largura do seletor de cor da legenda (mesmo valor do color_edit_button do egui).
+const COLOR_PICKER_WIDTH: f32 = 200.0;
+
+// Cores padrão de V, A e W, usadas nas leituras, nos campos e no gráfico.
+const DEFAULT_SERIES_COLORS: [Color32; 3] = [
+    Color32::from_rgb(230, 60, 60),
+    Color32::from_rgb(60, 200, 90),
+    Color32::from_rgb(60, 140, 255),
+];
+
+const OK_COLOR: Color32 = Color32::from_rgb(60, 200, 90);
+const WARN_COLOR: Color32 = Color32::from_rgb(230, 180, 40);
+const ERROR_COLOR: Color32 = Color32::from_rgb(255, 90, 90);
+const ACTION_COLOR: Color32 = Color32::from_rgb(60, 140, 255);
 
 impl AppModel {
     fn new() -> Self {
@@ -92,10 +109,12 @@ impl AppModel {
             editing_cset: false,
             run_start: None,
             frozen_elapsed: Duration::ZERO,
-            last_applied_profile: None,
+            setpoint_dirty: false,
+            selected_profile: 1,
             update_ms: 100,
             history: VecDeque::with_capacity(HISTORY_LEN),
             last_sample: None,
+            series_colors: DEFAULT_SERIES_COLORS,
         }
     }
 
@@ -225,6 +244,9 @@ impl AppModel {
     }
 
     fn sync_edit_buffers_if_idle(&mut self) {
+        if self.setpoint_dirty {
+            return;
+        }
         if !self.editing_vset
             && let Some(v) = self.state.vset
         {
@@ -260,9 +282,10 @@ impl AppModel {
         }
     }
 
-    fn apply_setpoints(&self) {
+    fn apply_setpoints(&mut self) {
         self.send_cmd(AppCommand::SetVoltage(self.vset_input));
         self.send_cmd(AppCommand::SetCurrent(self.cset_input));
+        self.setpoint_dirty = false;
     }
 
     /// Valores V/I salvos no grupo de memória `n` (1..6), se ambos disponíveis.
@@ -278,56 +301,28 @@ impl AppModel {
         }
     }
 
-    /// Aplica ao Vset/Iset ativo os valores salvos no grupo de memória `n` (1..6).
-    fn apply_profile(&mut self, n: u8) {
+    /// Carrega nos campos de edição os valores do grupo de memória `n` (1..6),
+    /// sem enviá-los ao aparelho — o envio fica a cargo de "Aplicar".
+    fn load_profile(&mut self, n: u8) {
         if let Some((v, c)) = self.group_values(n) {
-            self.send_cmd(AppCommand::SetVoltage(v));
-            self.send_cmd(AppCommand::SetCurrent(c));
-            self.last_applied_profile = Some(n);
+            self.vset_input = v;
+            self.cset_input = c;
+            self.setpoint_dirty = true;
         }
+        self.selected_profile = n;
     }
 
     /// Salva o Vset/Iset atualmente editado no grupo de memória `n` (1..6).
     fn save_profile(&mut self, n: u8) {
         self.send_cmd(AppCommand::SaveProfile(n, self.vset_input, self.cset_input));
-        self.last_applied_profile = Some(n);
+        self.selected_profile = n;
     }
 
-    fn left_readouts(&mut self, ui: &mut egui::Ui) {
-        ui.vertical(|ui| {
-            ui.add(ReadoutRow {
-                icon: "V",
-                accent: Color32::from_rgb(230, 200, 30),
-                primary: format!("{:05.2} V", self.state.output_voltage.unwrap_or(0.0)),
-                secondary_label: "Vset",
-                secondary_value: format!("{:05.2} V", self.state.vset.unwrap_or(0.0)),
-            });
-            ui.add_space(6.0);
-            ui.add(ReadoutRow {
-                icon: "A",
-                accent: Color32::from_rgb(0, 200, 150),
-                primary: format!("{:05.3} A", self.state.output_current.unwrap_or(0.0)),
-                secondary_label: "Iset",
-                secondary_value: format!("{:05.3} A", self.state.cset.unwrap_or(0.0)),
-            });
-            ui.add_space(6.0);
-            ui.add(ReadoutRow {
-                icon: "W",
-                accent: Color32::from_rgb(60, 140, 255),
-                primary: format!("{:05.2} W", self.state.output_power.unwrap_or(0.0)),
-                secondary_label: "Temp",
-                secondary_value: format!("{:.0}\u{b0}C", self.state.temperature.unwrap_or(0.0)),
-            });
-
-            ui.add_space(10.0);
-            self.setpoint_editors(ui);
-
-            ui.add_space(6.0);
-            self.connection_controls(ui);
-        });
+    fn is_connected(&self) -> bool {
+        matches!(self.connection, ConnectionState::Connected)
     }
 
-    fn connection_controls(&mut self, ui: &mut egui::Ui) {
+    fn top_bar(&mut self, ui: &mut egui::Ui) {
         let is_idle = matches!(
             self.connection,
             ConnectionState::Disconnected | ConnectionState::Error(_)
@@ -336,284 +331,327 @@ impl AppModel {
             self.refresh_available_ports();
         }
 
-        egui::Frame::new()
-            .fill(Color32::from_gray(30))
-            .corner_radius(6.0)
-            .inner_margin(8.0)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.add_enabled_ui(is_idle, |ui| {
-                        let selected_text = if self.selected_port.is_empty() {
-                            "-- porta --".to_owned()
-                        } else {
-                            self.selected_port.clone()
-                        };
-                        egui::ComboBox::from_id_salt("serial_port_combo")
-                            .selected_text(selected_text)
-                            .show_ui(ui, |ui| {
-                                for port in self.available_ports.clone() {
-                                    ui.selectable_value(
-                                        &mut self.selected_port,
-                                        port.clone(),
-                                        port,
-                                    );
-                                }
-                            });
-                    });
+        ui.horizontal(|ui| {
+            let (status_color, status_text) = match &self.connection {
+                ConnectionState::Disconnected => (Color32::from_gray(110), "Desconectado"),
+                ConnectionState::Connecting => (WARN_COLOR, "Conectando..."),
+                ConnectionState::Connected => (OK_COLOR, "Conectado"),
+                ConnectionState::Error(_) => (ERROR_COLOR, "Erro"),
+            };
+            status_dot(ui, status_color).on_hover_text(status_text);
 
-                    let (label, color) = match &self.connection {
-                        ConnectionState::Disconnected | ConnectionState::Error(_) => {
-                            ("Connect", Color32::from_rgb(60, 140, 255))
-                        }
-                        ConnectionState::Connecting => {
-                            ("Connecting...", Color32::from_rgb(230, 180, 40))
-                        }
-                        ConnectionState::Connected => ("Connected", Color32::from_rgb(60, 200, 90)),
-                    };
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new(label).color(Color32::BLACK).strong(),
-                            )
-                            .fill(color),
-                        )
-                        .clicked()
-                    {
-                        if is_idle {
-                            self.connect(ui.ctx());
-                        } else {
-                            self.disconnect();
-                        }
-                    }
-                });
-
-                if let ConnectionState::Error(msg) = &self.connection {
-                    ui.add_space(4.0);
-                    ui.label(
-                        egui::RichText::new(format!("Aviso: {msg}"))
-                            .color(Color32::from_rgb(255, 90, 90))
-                            .strong(),
-                    );
-                }
-            });
-    }
-
-    fn setpoint_editors(&mut self, ui: &mut egui::Ui) {
-        egui::Frame::new()
-            .fill(Color32::from_gray(30))
-            .corner_radius(6.0)
-            .inner_margin(8.0)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Vset");
-                    let v_resp = ui.add(
-                        egui::DragValue::new(&mut self.vset_input)
-                            .speed(0.05)
-                            .range(0.0..=30.0)
-                            .suffix(" V"),
-                    );
-                    if v_resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        self.send_cmd(AppCommand::SetVoltage(self.vset_input));
-                    }
-                    self.editing_vset = v_resp.dragged() || v_resp.has_focus();
-
-                    ui.add_space(12.0);
-
-                    ui.label("Iset");
-                    let c_resp = ui.add(
-                        egui::DragValue::new(&mut self.cset_input)
-                            .speed(0.01)
-                            .range(0.0..=5.0)
-                            .suffix(" A"),
-                    );
-                    if c_resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        self.send_cmd(AppCommand::SetCurrent(self.cset_input));
-                    }
-                    self.editing_cset = c_resp.dragged() || c_resp.has_focus();
-                });
-            });
-    }
-
-    fn right_buttons(&mut self, ui: &mut egui::Ui) {
-        ui.vertical(|ui| {
-            let w = ui.available_width();
-            let h = (ui.available_height() / 4.0 - 6.0).max(24.0);
-
-            if ui
-                .add_sized(
-                    [w, h],
-                    egui::Button::new(egui::RichText::new("OK").color(Color32::BLACK).strong())
-                        .fill(Color32::from_rgb(60, 200, 90)),
-                )
-                .clicked()
-            {
-                self.apply_setpoints();
-            }
-
-            ui.add_space(4.0);
-            // Sempre mostra o perfil-alvo (último selecionado/aplicado/salvo),
-            // não uma tentativa de "adivinhar" por comparação de valor — assim
-            // editar Vset/Iset depois de selecionar Mn não faz o combo virar
-            // "Custom" e perder de vista onde o Save vai gravar.
-            let target_profile = self.last_applied_profile.unwrap_or(1);
-            ui.horizontal(|ui| {
-                egui::ComboBox::from_id_salt("memory_profile_combo")
-                    .selected_text(format!("M{target_profile}"))
-                    .width(w * 0.55)
+            ui.add_enabled_ui(is_idle, |ui| {
+                let selected_text = if self.selected_port.is_empty() {
+                    "-- porta --".to_owned()
+                } else {
+                    self.selected_port.clone()
+                };
+                egui::ComboBox::from_id_salt("serial_port_combo")
+                    .selected_text(selected_text)
                     .show_ui(ui, |ui| {
-                        for n in 1..=6u8 {
-                            if ui
-                                .selectable_label(target_profile == n, format!("M{n}"))
-                                .clicked()
-                            {
-                                self.apply_profile(n);
-                            }
+                        for port in self.available_ports.clone() {
+                            ui.selectable_value(&mut self.selected_port, port.clone(), port);
                         }
                     });
-                if ui
-                    .add_sized(
-                        [ui.available_width(), 20.0],
-                        egui::Button::new(
-                            egui::RichText::new("Save")
-                                .color(Color32::LIGHT_GRAY)
-                                .strong()
-                                .size(11.0),
-                        ),
-                    )
-                    .on_hover_text(format!("Salvar Vset/Iset atual em M{target_profile}"))
-                    .clicked()
-                {
-                    self.save_profile(target_profile);
-                }
             });
 
-            ui.add_space(4.0);
-            let mode = self.state.cc_cv.as_deref().unwrap_or("--");
-            let mode_color = if mode == "CV" {
-                Color32::from_rgb(230, 180, 40)
-            } else {
-                Color32::from_rgb(60, 200, 90)
+            let label = match self.connection {
+                ConnectionState::Disconnected | ConnectionState::Error(_) => "Conectar",
+                ConnectionState::Connecting => "Cancelar",
+                ConnectionState::Connected => "Desconectar",
             };
-            ui.add_sized(
-                [w, h],
-                egui::Button::new(egui::RichText::new(mode).color(Color32::BLACK).strong())
-                    .fill(mode_color),
-            );
-
-            ui.add_space(4.0);
-            // output_opened == Some(true) significa saída DESLIGADA (circuito aberto).
-            let output_on = self.state.output_opened == Some(false);
-            let (label, color) = if output_on {
-                ("Running", Color32::from_rgb(60, 200, 90))
-            } else {
-                ("Stopped", Color32::from_rgb(220, 50, 50))
-            };
-            if ui
-                .add_sized(
-                    [w, h * 1.2],
-                    egui::Button::new(
-                        egui::RichText::new(label)
-                            .color(Color32::WHITE)
-                            .strong()
-                            .size(20.0),
-                    )
-                    .fill(color),
-                )
-                .clicked()
-            {
-                self.send_cmd(AppCommand::EnableOutput(!output_on));
+            if ui.button(label).clicked() {
+                if is_idle {
+                    self.connect(ui.ctx());
+                } else {
+                    self.disconnect();
+                }
             }
+
+            if let ConnectionState::Error(msg) = &self.connection {
+                ui.colored_label(ERROR_COLOR, msg);
+            }
+
+            if !self.is_connected() {
+                return;
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                info_pair(
+                    ui,
+                    "Temp",
+                    &format!("{:.0}\u{b0}C", self.state.temperature.unwrap_or(0.0)),
+                );
+                ui.separator();
+                info_pair(
+                    ui,
+                    "Entrada",
+                    &format!("{:.2} V", self.state.input_voltage.unwrap_or(0.0)),
+                );
+                ui.separator();
+                if let Some(fw) = &self.state.firmware_version {
+                    info_pair(ui, "fw", fw);
+                }
+                if let Some(model) = &self.state.model_name {
+                    ui.label(egui::RichText::new(model).strong());
+                }
+            });
         });
     }
 
-    fn right_chart(&mut self, ui: &mut egui::Ui) {
-        egui::Frame::new()
-            .fill(Color32::from_gray(20))
-            .corner_radius(6.0)
-            .inner_margin(8.0)
-            .show(ui, |ui| {
-                let last = self.history.back().copied();
-                ui.horizontal(|ui| {
-                    let legend = [
-                        (
-                            "V",
-                            CHART_VOLTAGE_COLOR,
-                            last.map(|s| format!("{:.2} V", s.voltage)),
-                        ),
-                        (
-                            "I",
-                            CHART_CURRENT_COLOR,
-                            last.map(|s| format!("{:.3} A", s.current)),
-                        ),
-                        (
-                            "P",
-                            CHART_POWER_COLOR,
-                            last.map(|s| format!("{:.2} W", s.power)),
-                        ),
-                    ];
-                    for (name, color, value) in legend {
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "\u{25a0} {name} {}",
-                                value.unwrap_or_else(|| "--".to_owned())
-                            ))
-                            .color(color)
-                            .size(12.0),
-                        );
-                        ui.add_space(6.0);
-                    }
-                });
-
-                let chart_h = (ui.available_height() - 30.0).max(60.0);
-                draw_history_chart(ui, &self.history, chart_h);
-
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Update").size(12.0));
-                    let resp = ui.add(
-                        egui::Slider::new(&mut self.update_ms, UPDATE_MS_RANGE)
-                            .step_by(50.0)
-                            .suffix(" ms"),
-                    );
-                    if resp.changed() {
-                        self.send_cmd(AppCommand::SetPollInterval(self.update_interval()));
-                    }
-                });
-            });
+    fn control_column(&mut self, ui: &mut egui::Ui) {
+        self.readouts(ui);
+        ui.add_space(8.0);
+        self.setpoint_card(ui);
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+            self.output_button(ui);
+        });
     }
 
-    fn bottom_info_panel(&self, ui: &mut egui::Ui) {
-        egui::Frame::new()
-            .fill(Color32::from_gray(25))
-            .corner_radius(6.0)
-            .inner_margin(8.0)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    draw_bar_chart_icon(ui);
-                    ui.vertical(|ui| {
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "Capacity   {:.3} Ah",
-                                self.state.output_capacity.unwrap_or(0.0)
-                            ))
-                            .size(13.0),
-                        );
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "Energy   {:.2} Wh",
-                                self.state.output_energy.unwrap_or(0.0)
-                            ))
-                            .size(13.0),
-                        );
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "Time   {}",
-                                format_hhmmss(self.current_elapsed())
-                            ))
-                            .size(13.0),
-                        );
-                    });
+    fn readouts(&self, ui: &mut egui::Ui) {
+        let mode = self.state.cc_cv.as_deref();
+        ui.add(ReadoutRow {
+            unit: "V",
+            accent: self.series_colors[0],
+            value: format!("{:05.2}", self.state.output_voltage.unwrap_or(0.0)),
+            badge: (mode == Some("CV")).then_some("CV"),
+        });
+        ui.add_space(4.0);
+        ui.add(ReadoutRow {
+            unit: "A",
+            accent: self.series_colors[1],
+            value: format!("{:05.3}", self.state.output_current.unwrap_or(0.0)),
+            badge: (mode == Some("CC")).then_some("CC"),
+        });
+        ui.add_space(4.0);
+        ui.add(ReadoutRow {
+            unit: "W",
+            accent: self.series_colors[2],
+            value: format!("{:05.2}", self.state.output_power.unwrap_or(0.0)),
+            badge: None,
+        });
+    }
+
+    fn setpoint_card(&mut self, ui: &mut egui::Ui) {
+        card(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Setpoint").strong());
+                if self.setpoint_dirty {
+                    ui.colored_label(WARN_COLOR, "\u{2022} não aplicado");
+                }
+            });
+
+            let mut enter_pressed = false;
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("V")
+                        .color(self.series_colors[0])
+                        .strong(),
+                );
+                let v_resp = ui.add(
+                    egui::DragValue::new(&mut self.vset_input)
+                        .speed(0.05)
+                        .range(0.0..=30.0)
+                        .fixed_decimals(2)
+                        .suffix(" V"),
+                );
+                ui.add_space(10.0);
+                ui.label(
+                    egui::RichText::new("A")
+                        .color(self.series_colors[1])
+                        .strong(),
+                );
+                let c_resp = ui.add(
+                    egui::DragValue::new(&mut self.cset_input)
+                        .speed(0.01)
+                        .range(0.0..=5.0)
+                        .fixed_decimals(3)
+                        .suffix(" A"),
+                );
+
+                if v_resp.changed() || c_resp.changed() {
+                    self.setpoint_dirty = true;
+                }
+                self.editing_vset = v_resp.dragged() || v_resp.has_focus();
+                self.editing_cset = c_resp.dragged() || c_resp.has_focus();
+                enter_pressed = (v_resp.lost_focus() || c_resp.lost_focus())
+                    && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            });
+
+            ui.horizontal(|ui| {
+                let apply = egui::Button::new(
+                    egui::RichText::new("Aplicar")
+                        .color(Color32::BLACK)
+                        .strong(),
+                )
+                .fill(if self.setpoint_dirty {
+                    ACTION_COLOR
+                } else {
+                    Color32::from_gray(90)
+                });
+                let clicked = ui
+                    .add_enabled(self.is_connected(), apply)
+                    .on_hover_text("Envia Vset/Iset ao aparelho (ou Enter)")
+                    .clicked();
+                if clicked || (enter_pressed && self.is_connected()) {
+                    self.apply_setpoints();
+                }
+                if self.setpoint_dirty && ui.button("Desfazer").clicked() {
+                    self.setpoint_dirty = false;
+                    self.sync_edit_buffers_if_idle();
+                }
+            });
+
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                ui.label("Memória");
+                for n in 1..=6u8 {
+                    let hover = match self.group_values(n) {
+                        Some((v, c)) => format!("M{n}: {v:.2} V / {c:.3} A — clique para carregar"),
+                        None => format!("M{n}: sem dados"),
+                    };
+                    if ui
+                        .selectable_label(self.selected_profile == n, format!("M{n}"))
+                        .on_hover_text(hover)
+                        .clicked()
+                    {
+                        self.load_profile(n);
+                    }
+                }
+                let target = self.selected_profile;
+                if ui
+                    .add_enabled(self.is_connected(), egui::Button::new("Salvar"))
+                    .on_hover_text(format!("Salva os valores dos campos em M{target}"))
+                    .clicked()
+                {
+                    self.save_profile(target);
+                }
+            });
+        });
+    }
+
+    fn output_button(&mut self, ui: &mut egui::Ui) {
+        // output_opened == Some(true) significa saída DESLIGADA (circuito aberto).
+        let output_on = self.state.output_opened == Some(false);
+        let (label, fill, text_color, hover) = if output_on {
+            (
+                "SAÍDA LIGADA",
+                OK_COLOR,
+                Color32::BLACK,
+                "Clique para desligar a saída",
+            )
+        } else {
+            (
+                "SAÍDA DESLIGADA",
+                Color32::from_gray(55),
+                Color32::WHITE,
+                "Clique para ligar a saída",
+            )
+        };
+        let button = egui::Button::new(
+            egui::RichText::new(label)
+                .color(text_color)
+                .strong()
+                .size(20.0),
+        )
+        .fill(fill);
+        let w = ui.available_width();
+        let connected = self.is_connected();
+        let resp = ui
+            .add_enabled_ui(connected, |ui| ui.add_sized([w, 56.0], button))
+            .inner;
+        if resp.on_hover_text(hover).clicked() {
+            self.send_cmd(AppCommand::EnableOutput(!output_on));
+        }
+    }
+
+    fn chart_panel(&mut self, ui: &mut egui::Ui) {
+        card(ui, |ui| {
+            let last = self.history.back().copied();
+            ui.horizontal(|ui| {
+                let legend = [
+                    last.map(|s| format!("{:.2} V", s.voltage)),
+                    last.map(|s| format!("{:.3} A", s.current)),
+                    last.map(|s| format!("{:.2} W", s.power)),
+                ];
+                for (i, value) in legend.into_iter().enumerate() {
+                    let resp = ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(format!(
+                                    "\u{25a0} {}",
+                                    value.unwrap_or_else(|| "--".to_owned())
+                                ))
+                                .color(self.series_colors[i])
+                                .size(12.0),
+                            )
+                            .frame(false),
+                        )
+                        .on_hover_text("Clique para mudar a cor");
+                    egui::Popup::from_toggle_button_response(&resp)
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                        .show(|ui| {
+                            ui.spacing_mut().slider_width = COLOR_PICKER_WIDTH;
+                            egui::color_picker::color_picker_color32(
+                                ui,
+                                &mut self.series_colors[i],
+                                egui::color_picker::Alpha::Opaque,
+                            );
+                            if ui.button("Padrão").clicked() {
+                                self.series_colors[i] = DEFAULT_SERIES_COLORS[i];
+                            }
+                        });
+                    ui.add_space(6.0);
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let window = Duration::from_millis(self.update_ms * HISTORY_LEN as u64);
+                    ui.label(
+                        egui::RichText::new(format!("janela {}", format_window(window)))
+                            .size(12.0)
+                            .weak(),
+                    );
                 });
             });
+
+            let chart_h = (ui.available_height() - 30.0).max(60.0);
+            draw_history_chart(ui, &self.history, self.series_colors, chart_h);
+
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Update").size(12.0));
+                let resp = ui.add(
+                    egui::Slider::new(&mut self.update_ms, UPDATE_MS_RANGE)
+                        .step_by(50.0)
+                        .suffix(" ms"),
+                );
+                if resp.changed() {
+                    self.send_cmd(AppCommand::SetPollInterval(self.update_interval()));
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Limpar").clicked() {
+                        self.history.clear();
+                        self.last_sample = None;
+                    }
+                });
+            });
+        });
+    }
+
+    fn bottom_bar(&self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            info_pair(
+                ui,
+                "Capacidade",
+                &format!("{:.3} Ah", self.state.output_capacity.unwrap_or(0.0)),
+            );
+            ui.separator();
+            info_pair(
+                ui,
+                "Energia",
+                &format!("{:.2} Wh", self.state.output_energy.unwrap_or(0.0)),
+            );
+            ui.separator();
+            info_pair(ui, "Tempo", &format_hhmmss(self.current_elapsed()));
+        });
     }
 }
 
@@ -644,30 +682,28 @@ impl eframe::App for AppModel {
         self.record_sample_if_due();
 
         egui::CentralPanel::default().show_inside(ui, |ui| {
-            egui::Panel::bottom("info_panel")
+            egui::Panel::top("top_bar")
                 .resizable(false)
-                .min_size(60.0)
-                .show_inside(ui, |ui| self.bottom_info_panel(ui));
+                .show_inside(ui, |ui| self.top_bar(ui));
+            egui::Panel::bottom("info_bar")
+                .resizable(false)
+                .show_inside(ui, |ui| self.bottom_bar(ui));
 
-            // Coluna das leituras com largura fixa; o resto é dividido entre
-            // botões e gráfico na proporção BUTTONS_SHARE.
+            // Coluna de controle com largura proporcional (limitada), gráfico com o resto.
             let full = ui.available_rect_before_wrap();
-            let gap = ui.spacing().item_spacing.x;
-            let left_w = LEFT_COLUMN_WIDTH.min(full.width() / 3.0);
-            let rest = full.width() - left_w - 2.0 * gap;
-            let buttons_w = rest * BUTTONS_SHARE;
-            let chart_w = rest - buttons_w;
+            let gap = ui.spacing().item_spacing.x * 2.0;
+            let control_w = (full.width() * CONTROL_SHARE)
+                .clamp(CONTROL_MIN_WIDTH, CONTROL_MAX_WIDTH)
+                .min(full.width());
+            let control_rect =
+                egui::Rect::from_min_size(full.min, Vec2::new(control_w, full.height()));
+            let chart_rect = egui::Rect::from_min_max(
+                Pos2::new(control_rect.right() + gap, full.top()),
+                full.max,
+            );
 
-            let column = |x: f32, w: f32| {
-                egui::Rect::from_min_size(Pos2::new(x, full.top()), Vec2::new(w, full.height()))
-            };
-            let left_rect = column(full.left(), left_w);
-            let buttons_rect = column(left_rect.right() + gap, buttons_w);
-            let chart_rect = column(buttons_rect.right() + gap, chart_w);
-
-            self.left_readouts(&mut column_ui(ui, left_rect));
-            self.right_buttons(&mut column_ui(ui, buttons_rect));
-            self.right_chart(&mut column_ui(ui, chart_rect));
+            self.control_column(&mut column_ui(ui, control_rect));
+            self.chart_panel(&mut column_ui(ui, chart_rect));
             ui.advance_cursor_after_rect(full);
         });
 
@@ -676,12 +712,12 @@ impl eframe::App for AppModel {
     }
 }
 
+/// Leitura grande de uma grandeza (V, A ou W) com selo opcional de modo (CV/CC).
 struct ReadoutRow<'a> {
-    icon: &'a str,
+    unit: &'a str,
     accent: Color32,
-    primary: String,
-    secondary_label: &'a str,
-    secondary_value: String,
+    value: String,
+    badge: Option<&'a str>,
 }
 
 impl<'a> egui::Widget for ReadoutRow<'a> {
@@ -689,59 +725,71 @@ impl<'a> egui::Widget for ReadoutRow<'a> {
         egui::Frame::new()
             .fill(Color32::from_gray(20))
             .corner_radius(6.0)
-            .inner_margin(6.0)
+            .inner_margin(egui::Margin::symmetric(10, 4))
             .show(ui, |ui| {
+                ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
-                    egui::Frame::new()
-                        .fill(self.accent)
-                        .corner_radius(4.0)
-                        .inner_margin(6.0)
-                        .show(ui, |ui| {
-                            ui.label(
-                                egui::RichText::new(self.icon)
-                                    .color(Color32::BLACK)
-                                    .strong()
-                                    .size(18.0),
-                            );
-                        });
-
-                    ui.add_space(8.0);
                     ui.label(
-                        egui::RichText::new(self.primary)
+                        egui::RichText::new(self.value)
                             .color(self.accent)
                             .strong()
-                            .size(36.0),
+                            .size(34.0),
                     );
-
-                    ui.add_space(8.0);
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "{} {}",
-                            self.secondary_label, self.secondary_value
-                        ))
-                        .size(13.0)
-                        .weak(),
-                    );
+                    ui.label(egui::RichText::new(self.unit).color(self.accent).size(20.0));
+                    if let Some(badge) = self.badge {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            egui::Frame::new()
+                                .fill(self.accent)
+                                .corner_radius(4.0)
+                                .inner_margin(egui::Margin::symmetric(8, 3))
+                                .show(ui, |ui| {
+                                    ui.label(
+                                        egui::RichText::new(badge)
+                                            .color(Color32::BLACK)
+                                            .strong()
+                                            .size(14.0),
+                                    );
+                                });
+                        });
+                    }
                 });
             })
             .response
     }
 }
 
-fn draw_bar_chart_icon(ui: &mut egui::Ui) {
-    let size = Vec2::new(16.0, 16.0);
-    let (rect, _resp) = ui.allocate_exact_size(size, Sense::hover());
-    let painter = ui.painter();
-    let heights = [0.4, 0.7, 1.0];
-    let bar_w = rect.width() / 4.0;
-    for (i, h) in heights.iter().enumerate() {
-        let bar_h = rect.height() * h;
-        let x = rect.left() + (i as f32) * bar_w * 1.3;
-        let bar =
-            egui::Rect::from_min_size(Pos2::new(x, rect.bottom() - bar_h), Vec2::new(bar_w, bar_h));
-        painter.rect_filled(bar, 1.0, Color32::LIGHT_GRAY);
+/// Moldura padrão dos blocos da interface.
+fn card(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
+    egui::Frame::new()
+        .fill(Color32::from_gray(25))
+        .corner_radius(6.0)
+        .inner_margin(8.0)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            add_contents(ui);
+        });
+}
+
+/// Rótulo discreto seguido do valor, ex.: "Energia 0.00 Wh".
+fn info_pair(ui: &mut egui::Ui, label: &str, value: &str) {
+    ui.label(egui::RichText::new(label).weak());
+    ui.label(egui::RichText::new(value).strong());
+}
+
+fn status_dot(ui: &mut egui::Ui, color: Color32) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
+    ui.painter().circle_filled(rect.center(), 5.0, color);
+    resp
+}
+
+/// Formata a duração da janela do gráfico ("30 s", "2.5 min").
+fn format_window(d: Duration) -> String {
+    let s = d.as_secs_f32();
+    if s < 60.0 {
+        format!("{s:.0} s")
+    } else {
+        format!("{:.1} min", s / 60.0).replace(".0 min", " min")
     }
-    ui.add_space(6.0);
 }
 
 /// Cria uma sub-UI vertical restrita a `rect`.
@@ -796,16 +844,21 @@ impl AxisScale {
 
 /// Desenha as três séries do histórico, cada uma com sua própria escala
 /// (à esquerda, na cor da série), já que V, A e W têm faixas bem diferentes.
-fn draw_history_chart(ui: &mut egui::Ui, history: &VecDeque<Sample>, height: f32) {
+fn draw_history_chart(
+    ui: &mut egui::Ui,
+    history: &VecDeque<Sample>,
+    colors: [Color32; 3],
+    height: f32,
+) {
     let size = Vec2::new(ui.available_width(), height);
     let (rect, _resp) = ui.allocate_exact_size(size, Sense::hover());
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 4.0, Color32::from_gray(12));
 
     let series: [(fn(&Sample) -> f32, Color32, &str, f32); 3] = [
-        (|s| s.voltage, CHART_VOLTAGE_COLOR, "V", 0.1),
-        (|s| s.current, CHART_CURRENT_COLOR, "A", 0.01),
-        (|s| s.power, CHART_POWER_COLOR, "W", 0.1),
+        (|s| s.voltage, colors[0], "V", 0.1),
+        (|s| s.current, colors[1], "A", 0.01),
+        (|s| s.power, colors[2], "W", 0.1),
     ];
 
     let axis_w = CHART_AXIS_COL_W * series.len() as f32;
@@ -985,7 +1038,7 @@ fn serial_thread_main(
 }
 
 const WIDTH: f32 = 1000.0;
-const HEIGHT: f32 = 480.0;
+const HEIGHT: f32 = 540.0;
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
