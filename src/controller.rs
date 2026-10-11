@@ -1,7 +1,7 @@
 mod dps150;
 
 use dps150::{DPS150, DPSUpdate, commands};
-use eframe::egui::{self, Color32, Pos2, Sense, Stroke, Vec2};
+use eframe::egui::{self, Color32, Pos2, Sense, Vec2};
 use std::{
     io::{Read, Write},
     sync::mpsc::{self, Receiver, Sender},
@@ -244,7 +244,6 @@ impl AppModel {
                 primary: format!("{:05.2} V", self.state.output_voltage.unwrap_or(0.0)),
                 secondary_label: "Vset",
                 secondary_value: format!("{:05.2} V", self.state.vset.unwrap_or(0.0)),
-                secondary_icon: SecondaryIcon::Lock,
             });
             ui.add_space(6.0);
             ui.add(ReadoutRow {
@@ -253,7 +252,6 @@ impl AppModel {
                 primary: format!("{:05.3} A", self.state.output_current.unwrap_or(0.0)),
                 secondary_label: "Iset",
                 secondary_value: format!("{:05.3} A", self.state.cset.unwrap_or(0.0)),
-                secondary_icon: SecondaryIcon::Fan,
             });
             ui.add_space(6.0);
             ui.add(ReadoutRow {
@@ -262,7 +260,6 @@ impl AppModel {
                 primary: format!("{:05.2} W", self.state.output_power.unwrap_or(0.0)),
                 secondary_label: "Temp",
                 secondary_value: format!("{:.0}\u{b0}C", self.state.temperature.unwrap_or(0.0)),
-                secondary_icon: SecondaryIcon::Thermometer,
             });
 
             ui.add_space(10.0);
@@ -549,19 +546,12 @@ impl eframe::App for AppModel {
     }
 }
 
-enum SecondaryIcon {
-    Lock,
-    Fan,
-    Thermometer,
-}
-
 struct ReadoutRow<'a> {
     icon: &'a str,
     accent: Color32,
     primary: String,
     secondary_label: &'a str,
     secondary_value: String,
-    secondary_icon: SecondaryIcon,
 }
 
 impl<'a> egui::Widget for ReadoutRow<'a> {
@@ -594,77 +584,18 @@ impl<'a> egui::Widget for ReadoutRow<'a> {
                     );
 
                     ui.add_space(8.0);
-                    ui.vertical(|ui| {
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "{} {}",
-                                self.secondary_label, self.secondary_value
-                            ))
-                            .size(13.0)
-                            .weak(),
-                        );
-                        draw_secondary_icon(ui, self.secondary_icon);
-                    });
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} {}",
+                            self.secondary_label, self.secondary_value
+                        ))
+                        .size(13.0)
+                        .weak(),
+                    );
                 });
             })
             .response
     }
-}
-
-fn draw_secondary_icon(ui: &mut egui::Ui, icon: SecondaryIcon) {
-    match icon {
-        SecondaryIcon::Lock => draw_lock_icon(ui),
-        SecondaryIcon::Fan => draw_fan_icon(ui),
-        SecondaryIcon::Thermometer => draw_thermometer_icon(ui),
-    }
-}
-
-fn draw_lock_icon(ui: &mut egui::Ui) {
-    let size = Vec2::splat(14.0);
-    let (rect, _resp) = ui.allocate_exact_size(size, Sense::hover());
-    let painter = ui.painter();
-    let stroke = Stroke::new(1.3f32, Color32::LIGHT_GRAY);
-    let shackle_center = Pos2::new(rect.center().x, rect.top() + 4.0);
-    painter.circle_stroke(shackle_center, 3.5, stroke);
-    let body = egui::Rect::from_min_size(
-        Pos2::new(rect.left() + 1.0, rect.center().y),
-        Vec2::new(rect.width() - 2.0, rect.height() / 2.0 - 1.0),
-    );
-    painter.rect_filled(body, 2.0, Color32::LIGHT_GRAY);
-}
-
-fn draw_fan_icon(ui: &mut egui::Ui) {
-    let size = Vec2::splat(14.0);
-    let (rect, _resp) = ui.allocate_exact_size(size, Sense::hover());
-    let painter = ui.painter();
-    let stroke = Stroke::new(1.3f32, Color32::LIGHT_GRAY);
-    let center = rect.center();
-    let radius = rect.width() / 2.0 - 1.0;
-    for i in 0..3 {
-        let angle = std::f32::consts::FRAC_PI_2 + (i as f32) * std::f32::consts::TAU / 3.0;
-        let tip = Pos2::new(
-            center.x + radius * angle.cos(),
-            center.y - radius * angle.sin(),
-        );
-        painter.line_segment([center, tip], stroke);
-    }
-    painter.circle_filled(center, 1.5, Color32::LIGHT_GRAY);
-}
-
-fn draw_thermometer_icon(ui: &mut egui::Ui) {
-    let size = Vec2::splat(14.0);
-    let (rect, _resp) = ui.allocate_exact_size(size, Sense::hover());
-    let painter = ui.painter();
-    let stem = egui::Rect::from_min_size(
-        Pos2::new(rect.center().x - 1.2, rect.top() + 1.0),
-        Vec2::new(2.4, rect.height() - 5.0),
-    );
-    painter.rect_filled(stem, 1.0, Color32::LIGHT_GRAY);
-    painter.circle_filled(
-        Pos2::new(rect.center().x, rect.bottom() - 2.5),
-        3.0,
-        Color32::from_rgb(220, 60, 60),
-    );
 }
 
 fn draw_bar_chart_icon(ui: &mut egui::Ui) {
