@@ -28,7 +28,9 @@ o instante atual (`now`) entra por parâmetro.
 | `PORT_REFRESH_INTERVAL` | Intervalo mínimo entre duas consultas à lista de portas: 1 s |
 | `ConnectionState` | O ponto em que a conexão está: `Disconnected`, `Connecting`, `Connected` ou `Error(mensagem)` (veja o [diagrama de estados](../arquitetura.md#estado-da-conexão)) |
 | `SetpointEditor` | A tensão e a corrente em edição (`vset_input`, `cset_input`), mais três marcas privadas: há alteração pendente (`dirty`) e se o usuário está com o foco ou arrastando o campo de tensão (`editing_v`) ou de corrente (`editing_c`) |
+| `SaveStatus` | A situação da última gravação do setup de memória: `Idle`, `Verifying` (enviado, esperando a leitura que confirma), `Confirmed` (a fonte devolveu o que foi enviado) ou `NotConfirmed` |
 | `OutputClock` | O tempo com a saída ligada (privado): o instante em que ela ligou (`run_start`) e o valor congelado quando desligou (`frozen`) |
+| `SAVE_VERIFY_READS` | Quantas leituras completas a conferência espera antes de desistir (privada): **3** |
 | `AppState` | O estado completo. Os campos são privados e só mudam pelos métodos abaixo |
 
 ## Funções
@@ -238,8 +240,41 @@ dessa referência. Editar os números **não** marca a edição como pendente: q
 | **Saída** | `Some((tensão, corrente))` ou `None` se `n` está fora de 1..6 ou a fonte ainda não informou os dois valores. |
 | **Efeitos** | nenhum |
 
-**Como funciona**: um `match` em `n` lê o par de campos do grupo (`gN_vset` e `gN_cset`) do estado da fonte.
-O operador `?` faz o resultado ser `None` se qualquer um dos dois estiver ausente.
+**Como funciona**: chama `group_of` com o estado da fonte, que lê o par de campos do grupo (`gN_vset` e
+`gN_cset`). O resultado é `None` se qualquer um dos dois estiver ausente.
+
+### `AppState::memory_setup`
+
+| | |
+|---|---|
+| **Propósito** | Dar o setup em edição no quadro da memória selecionada. |
+| **Entradas** | nenhuma |
+| **Saída** | Uma referência ao `MemorySetup` (os seis valores e a marca de pendência). |
+| **Efeitos** | nenhum |
+
+**Como funciona**: devolve o campo. A tela lê os valores e a pendência por aqui.
+
+### `AppState::save_status`
+
+| | |
+|---|---|
+| **Propósito** | Dar a situação da última gravação do setup. |
+| **Entradas** | nenhuma |
+| **Saída** | O `SaveStatus` atual (uma cópia). |
+| **Efeitos** | nenhum |
+
+**Como funciona**: devolve o campo. A tela mostra "verificando…", "gravado" ou "não confirmado".
+
+### `AppState::pending_switch`
+
+| | |
+|---|---|
+| **Propósito** | Dizer se há uma troca de memória esperando a confirmação do usuário. |
+| **Entradas** | nenhuma |
+| **Saída** | `Some(n)` com a memória pedida, ou `None`. |
+| **Efeitos** | nenhum |
+
+**Como funciona**: devolve o campo. A tela mostra o aviso "Descartar as alterações…" quando é `Some`.
 
 ### `AppState::history`
 
@@ -315,8 +350,9 @@ novo. Uma porta recém-plugada pode demorar até 1 s para aparecer.
 **Como funciona**: se não há sessão, não faz nada. Senão, recolhe de uma vez todos os eventos do canal e trata
 cada um, na ordem:
 
-- `Update(atualização)`: junta a atualização ao estado (`merge`) e sincroniza os campos de edição
-  (`sync_edit_buffers`);
+- `Update(atualização)`: primeiro confere uma gravação em andamento (`check_save_status`), depois junta a
+  atualização ao estado (`merge`) e sincroniza os campos de edição (`sync_edit_buffers`) e o quadro de setup
+  (`sync_memory_setup`);
 - `Connected`: o estado da conexão vira `Connected`;
 - `Error(mensagem)`: o estado vira `Error(mensagem)` e a sessão é encerrada (`end_session`), o que apaga os
   canais e zera a telemetria.
@@ -410,33 +446,99 @@ zera `dirty`. Sem sessão, os comandos são descartados (os botões ficam desabi
 **Como funciona**: zera `dirty` e chama `sync_edit_buffers`, que, agora sem pendência, copia o `vset` e o
 `cset` da fonte para os campos.
 
-### `AppState::load_profile`
+### `AppState::select_memory`
 
 | | |
 |---|---|
-| **Propósito** | Carregar nos campos de edição os valores de uma memória (M1 a M6), para o usuário conferir. |
+| **Propósito** | Selecionar uma memória (M1 a M6) e mostrar os valores dela no quadro de setup. |
 | **Entradas** | `n`: o grupo, de 1 a 6. |
 | **Saída** | nada |
-| **Efeitos** | Altera os campos de edição, a marca de pendência e a memória selecionada. **Não envia nada à fonte.** |
+| **Efeitos** | Muda a memória selecionada, descarta qualquer edição pendente do quadro e recarrega os campos. **Não envia nada à fonte.** |
 
-**Como funciona**: se `group_values(n)` tem os dois valores, copia-os para `vset_input` e `cset_input` e
-marca a edição como pendente. Em qualquer caso (mesmo sem dados), `selected_profile` passa a ser `n`, porque é
-o alvo do "Salvar". O envio à fonte só acontece quando o usuário clica em "Aplicar".
+**Como funciona**: ignora `n` fora de 1..6. Senão grava `selected_profile`, esquece um pedido de troca em espera, zera o estado da gravação, desliga a pendência e chama `sync_memory_setup`, que copia para o quadro os valores da memória e as proteções do aparelho.
 
-**Exemplo:** M2 guarda 12,0 V e 1,5 A. `load_profile(2)` deixa os campos em 12,0 e 1,5, mostra "não aplicado" e
-**não** manda nenhum comando. Só `apply_setpoints` os envia.
+**Exemplo:** M2 guarda 5,00 V e 0,500 A e o aparelho tem OVP 36,00 V. `select_memory(2)` mostra os seis valores no quadro e **não** manda nenhum comando.
 
-### `AppState::save_profile`
+### `AppState::request_select_memory`
 
 | | |
 |---|---|
-| **Propósito** | Gravar na fonte os valores dos campos como uma memória. |
+| **Propósito** | Pedir a troca de memória respeitando uma edição pendente. |
+| **Entradas** | `n`: o grupo desejado, de 1 a 6. |
+| **Saída** | nada |
+| **Efeitos** | Troca na hora (como `select_memory`) ou guarda o pedido para o usuário confirmar. Nunca envia nada à fonte. |
+
+**Como funciona**: se `n` já é a memória selecionada, não faz nada. Com edição pendente no quadro, guarda `Some(n)` em `pending_switch` e **não troca**; sem edição pendente, chama `select_memory(n)`. Assim o usuário nunca perde o que digitou sem ser avisado.
+
+### `AppState::confirm_switch`
+
+| | |
+|---|---|
+| **Propósito** | Confirmar a troca de memória que estava esperando. |
+| **Entradas** | nenhuma |
+| **Saída** | nada |
+| **Efeitos** | Troca a memória e descarta a edição pendente. |
+
+**Como funciona**: retira o pedido de `pending_switch` e, se havia um, chama `select_memory` com ele.
+
+### `AppState::cancel_switch`
+
+| | |
+|---|---|
+| **Propósito** | Desistir da troca de memória que estava esperando. |
+| **Entradas** | nenhuma |
+| **Saída** | nada |
+| **Efeitos** | Esquece o pedido; a edição continua. |
+
+**Como funciona**: zera `pending_switch`.
+
+### `AppState::set_setup_field`
+
+| | |
+|---|---|
+| **Propósito** | Registrar a edição de um campo do quadro de setup. |
+| **Entradas** | `field`: o campo. `value`: o novo valor. |
+| **Saída** | nada |
+| **Efeitos** | Grava o valor, marca a pendência e zera o estado da gravação anterior. |
+
+**Como funciona**: chama `MemorySetup::set` e põe `save_status` em `Idle`. Não valida: a validação é feita ao salvar e, para marcar a tela, a cada quadro.
+
+### `AppState::discard_memory_setup_edits`
+
+| | |
+|---|---|
+| **Propósito** | Descartar a edição do quadro e voltar aos valores da fonte. |
+| **Entradas** | nenhuma |
+| **Saída** | nada |
+| **Efeitos** | Desliga a pendência, esquece um pedido de troca e recarrega os campos. **Não envia nada.** |
+
+**Como funciona**: chama `clear_dirty`, zera `pending_switch` e `sync_memory_setup`, que (agora sem pendência) copia os valores da fonte.
+
+### `AppState::use_memory_in_setpoint`
+
+| | |
+|---|---|
+| **Propósito** | Carregar a tensão e a corrente de uma memória no card Setpoint. |
 | **Entradas** | `n`: o grupo, de 1 a 6. |
 | **Saída** | nada |
-| **Efeitos** | **Envia** `SaveProfile` à fonte e muda a memória selecionada. |
+| **Efeitos** | Altera os campos do setpoint e marca "não aplicado". **Não envia nada à fonte.** |
 
-**Como funciona**: envia `SaveProfile(n, vset_input, cset_input)` e põe `selected_profile = n`. Não altera a
-marca de pendência, porque gravar uma memória não muda o setpoint ativo.
+**Como funciona**: se `group_values(n)` tem os dois valores, copia-os para `vset_input` e `cset_input` e marca a edição como pendente. O envio só acontece quando o usuário clica em "Aplicar". É o comportamento que o clique numa memória tinha antes do quadro de setup.
+
+**Exemplo:** M2 guarda 12,0 V e 1,5 A. `use_memory_in_setpoint(2)` deixa os campos em 12,0 e 1,5, mostra "não aplicado" e **não** manda nenhum comando. Só `apply_setpoints` os envia.
+
+### `AppState::save_memory_setup`
+
+| | |
+|---|---|
+| **Propósito** | Validar e gravar na fonte os seis valores do quadro, na memória selecionada. |
+| **Entradas** | nenhuma (usa o quadro e `selected_profile`). |
+| **Saída** | `Ok(())` se enviou; `Err(erros)` se não enviou (lista vazia quando falta conexão). |
+| **Efeitos** | **Envia** `SaveMemorySetup` à fonte, desliga a pendência e começa a conferência (`Verifying`). |
+
+**Como funciona**: sem conexão, devolve `Err` vazio e não envia. Com conexão, chama `MemorySetup::validate`; havendo erro, devolve todos sem enviar nada. Sem erro, envia `SaveMemorySetup(valores)`, limpa a pendência e o pedido de troca e põe `save_status` em `Verifying` com 3 leituras de prazo. A escrita de OVP/OCP/OPP/OTP é **experimental**: por isso o resultado é conferido pela releitura, e não presumido.
+
+**Exemplo:** M2 selecionada, Vset 5,00, Iset 0,500, OVP 36,00, OCP 2,50, OPP 295,20 e OTP 60. `save_memory_setup()` envia um único `SaveMemorySetup` com `group: 2`. Com Vset 12,00 e OVP 10,00, devolve `Err([VsetAboveOvp])` e não envia nada.
 
 ### `AppState::toggle_output`
 
@@ -514,10 +616,11 @@ quadro seguinte) e chama `reset_telemetry`. Não muda o `ConnectionState`: quem 
 | **Propósito** | Apagar os dados de uma sessão anterior. |
 | **Entradas** | nenhuma |
 | **Saída** | nada |
-| **Efeitos** | Zera o estado da fonte, o relógio de saída e o histórico. |
+| **Efeitos** | Zera o estado da fonte, o relógio de saída, o histórico e o quadro de setup. |
 
-**Como funciona**: troca o estado da fonte por um `DPSUpdate` vazio, o relógio por um novo (parado, em zero) e
-esvazia o histórico. Acontece ao conectar, desconectar e quando há erro.
+**Como funciona**: troca o estado da fonte por um `DPSUpdate` vazio, o relógio por um novo (parado, em zero),
+esvazia o histórico e limpa o quadro de setup, o pedido de troca e o estado da gravação. Acontece ao conectar,
+desconectar e quando há erro.
 
 ### `AppState::set_available_ports`
 
@@ -574,15 +677,64 @@ coisa para o `cset` e o campo de corrente. Só copia quando a fonte já informou
 continua em 5,0. Depois de "Desfazer" (ou "Aplicar" e a fonte confirmar), o próximo `sync_edit_buffers` põe
 o campo em 3,3.
 
+### `AppState::sync_memory_setup`
+
+*(interna)*
+
+| | |
+|---|---|
+| **Propósito** | Manter o quadro de setup igual ao que a fonte informa. |
+| **Entradas** | nenhuma |
+| **Saída** | nada |
+| **Efeitos** | Copia valores da fonte para o quadro, quando permitido. |
+
+**Como funciona**: não faz nada se há edição pendente ou se uma gravação está sendo conferida (senão o quadro voltaria aos valores antigos antes de a fonte devolver os novos). Senão carrega Vset/Iset da memória selecionada (`group_values`) e OVP, OCP, OPP e OTP do aparelho; o que a fonte ainda não informou fica vazio ("—").
+
+### `AppState::check_save_status`
+
+*(interna)*
+
+| | |
+|---|---|
+| **Propósito** | Conferir, a cada leitura, se a fonte guardou o que foi enviado. |
+| **Entradas** | `update`: a atualização que acabou de chegar, antes do `merge`. |
+| **Saída** | nada |
+| **Efeitos** | Muda `save_status` de `Verifying` para `Confirmed` ou `NotConfirmed`. |
+
+**Como funciona**: só age em `Verifying` e só considera leituras **completas** (as que trazem `ovp`; as parciais não contam). Compara os seis valores da leitura com os enviados, cada um dentro da tolerância do campo (meio passo da casa decimal). Se batem, `Confirmed`. Se não, gasta uma das 3 leituras de prazo e, na última, `NotConfirmed`. A leitura que chega no meio da gravação pode ser antiga; por isso o prazo de 3.
+
+**Exemplo:** enviado Vset 5,00 e a leitura traz 5,004: a diferença (0,004) é menor que 0,005, então `Confirmed`. Três leituras com OVP 30,00 em vez de 36,00 levam a `NotConfirmed`.
+
+### `group_of`
+
+*(interna)*
+
+| | |
+|---|---|
+| **Propósito** | Ler Vset e Iset de um grupo de memória numa leitura da fonte. |
+| **Entradas** | `update`: a leitura. `n`: o grupo, de 1 a 6. |
+| **Saída** | `Some((tensão, corrente))` ou `None` se `n` está fora de 1..6 ou algum dos dois não veio. |
+| **Efeitos** | nenhum |
+
+**Como funciona**: um `match` em `n` lê o par `gN_vset`/`gN_cset` da leitura; o `?` torna o resultado `None` se qualquer um faltar. É usada por `group_values` (estado) e pela conferência (leitura nova).
+
 ## Testes
 
-Nove testes cobrem o módulo, todos sem janela e sem porta serial. Eles usam um `AppState` ligado a canais de
+Vinte e um testes cobrem o módulo, todos sem janela e sem porta serial. Eles usam um `AppState` ligado a canais de
 teste (`with_test_session`, que existe só nos testes), de onde enviam eventos e onde recolhem os comandos
 emitidos:
 
 - a edição pendente é preservada diante de uma atualização, e "Desfazer" sincroniza com a fonte;
-- carregar uma memória preenche os campos e **não envia comandos**;
-- Aplicar e Salvar enviam os valores dos campos;
+- selecionar uma memória mostra os seis valores no quadro de setup e **não envia comandos**; memória sem dado
+  deixa Vset/Iset vazios; memória fora de 1..6 é ignorada;
+- "Usar no setpoint" preenche o card Setpoint e **não envia comandos**;
+- a edição do setup é preservada diante de uma atualização e "Desfazer" volta à fonte;
+- trocar de memória com edição pendente pede confirmação (confirmar, cancelar e troca direta);
+- Salvar válido envia um único comando e limpa a pendência; Salvar inválido ou sem conexão não envia nada; os
+  seis máximos exatos são aceitos;
+- a conferência: leitura igual (dentro da tolerância) confirma, leitura parcial não conta, três leituras
+  diferentes não confirmam, e o quadro não volta ao valor antigo enquanto confere;
+- Aplicar envia os valores dos campos, inclusive os máximos de 36,00 V e 8,200 A;
 - o merge parcial mantém os campos ausentes;
 - o relógio de saída conta, congela e zera;
 - o histórico só grava quando conectado;

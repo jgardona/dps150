@@ -2,6 +2,7 @@
 
 use super::{
     history::{History, Sample},
+    memory_setup::{MemorySetup, SetupError, SetupField, SetupValues},
     protocol::DPSUpdate,
     session::{self, AppCommand, SerialEvent},
 };
@@ -22,6 +23,24 @@ pub enum ConnectionState {
     Connecting,
     Connected,
     Error(String),
+}
+
+/// Leituras completas (com proteções) que a conferência espera depois de salvar o setup.
+const SAVE_VERIFY_READS: u8 = 3;
+
+/// Situação da última gravação do setup de memória.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SaveStatus {
+    Idle,
+    /// Enviado; esperando uma leitura completa da fonte para comparar.
+    Verifying {
+        expected: SetupValues,
+        reads_left: u8,
+    },
+    /// A fonte devolveu os valores enviados.
+    Confirmed,
+    /// As leituras não bateram com o que foi enviado.
+    NotConfirmed,
 }
 
 /// Valores de tensão/corrente em edição na interface.
@@ -84,6 +103,11 @@ pub struct AppState {
     setpoint: SetpointEditor,
     /// Grupo de memória (1..6) selecionado; alvo do "Salvar".
     selected_profile: u8,
+    /// Setup (Vset, Iset e proteções) em edição no quadro da memória selecionada.
+    memory_setup: MemorySetup,
+    /// Memória pedida enquanto há edição pendente: espera o usuário confirmar o descarte.
+    pending_switch: Option<u8>,
+    save_status: SaveStatus,
 
     clock: OutputClock,
 
@@ -110,6 +134,9 @@ impl AppState {
             last_port_refresh: None,
             setpoint: SetpointEditor::default(),
             selected_profile: 1,
+            memory_setup: MemorySetup::default(),
+            pending_switch: None,
+            save_status: SaveStatus::Idle,
             clock: OutputClock::default(),
             update_ms: 100,
             history: History::new(),
@@ -167,18 +194,23 @@ impl AppState {
         self.selected_profile
     }
 
+    /// Setup em edição no quadro da memória selecionada.
+    pub fn memory_setup(&self) -> &MemorySetup {
+        &self.memory_setup
+    }
+
+    pub fn save_status(&self) -> SaveStatus {
+        self.save_status
+    }
+
+    /// Memória pedida que aguarda a confirmação de descarte da edição pendente.
+    pub fn pending_switch(&self) -> Option<u8> {
+        self.pending_switch
+    }
+
     /// Valores V/I salvos no grupo de memória `n` (1..6), se ambos disponíveis.
     pub fn group_values(&self, n: u8) -> Option<(f32, f32)> {
-        let s = &self.state;
-        match n {
-            1 => Some((s.g1_vset?, s.g1_cset?)),
-            2 => Some((s.g2_vset?, s.g2_cset?)),
-            3 => Some((s.g3_vset?, s.g3_cset?)),
-            4 => Some((s.g4_vset?, s.g4_cset?)),
-            5 => Some((s.g5_vset?, s.g5_cset?)),
-            6 => Some((s.g6_vset?, s.g6_cset?)),
-            _ => None,
-        }
+        group_of(&self.state, n)
     }
 
     pub fn history(&self) -> &History {
@@ -223,8 +255,10 @@ impl AppState {
         for evt in events {
             match evt {
                 SerialEvent::Update(update) => {
+                    self.check_save_status(&update);
                     self.merge(*update);
                     self.sync_edit_buffers();
+                    self.sync_memory_setup();
                 }
                 SerialEvent::Connected => self.connection = ConnectionState::Connected,
                 SerialEvent::Error(msg) => {
@@ -296,25 +330,85 @@ impl AppState {
         self.sync_edit_buffers();
     }
 
-    /// Carrega nos campos de edição os valores do grupo de memória `n` (1..6),
-    /// sem enviá-los ao aparelho — o envio fica a cargo de "Aplicar".
-    pub fn load_profile(&mut self, n: u8) {
+    /// Seleciona a memória `n` (1..6) e mostra os valores dela no quadro de setup, descartando
+    /// qualquer edição pendente. Não envia nada ao aparelho.
+    pub fn select_memory(&mut self, n: u8) {
+        if !(1..=6).contains(&n) {
+            return;
+        }
+        self.selected_profile = n;
+        self.pending_switch = None;
+        self.save_status = SaveStatus::Idle;
+        self.memory_setup.clear_dirty();
+        self.sync_memory_setup();
+    }
+
+    /// Pede a troca para a memória `n`. Com edição pendente, não troca: guarda o pedido para o
+    /// usuário confirmar o descarte (`confirm_switch`) ou continuar editando (`cancel_switch`).
+    pub fn request_select_memory(&mut self, n: u8) {
+        if n == self.selected_profile {
+            return;
+        }
+        if self.memory_setup.is_dirty() {
+            self.pending_switch = Some(n);
+        } else {
+            self.select_memory(n);
+        }
+    }
+
+    /// Confirma a troca pedida e descarta a edição pendente.
+    pub fn confirm_switch(&mut self) {
+        if let Some(n) = self.pending_switch.take() {
+            self.select_memory(n);
+        }
+    }
+
+    /// Mantém a edição e esquece o pedido de troca.
+    pub fn cancel_switch(&mut self) {
+        self.pending_switch = None;
+    }
+
+    /// Edição de um campo do quadro de setup.
+    pub fn set_setup_field(&mut self, field: SetupField, value: f32) {
+        self.memory_setup.set(field, value);
+        self.save_status = SaveStatus::Idle;
+    }
+
+    /// Descarta a edição do quadro e volta aos valores da fonte.
+    pub fn discard_memory_setup_edits(&mut self) {
+        self.memory_setup.clear_dirty();
+        self.pending_switch = None;
+        self.sync_memory_setup();
+    }
+
+    /// Carrega Vset/Iset da memória `n` (1..6) no card Setpoint, sem enviá-los ao aparelho:
+    /// o envio fica a cargo de "Aplicar".
+    pub fn use_memory_in_setpoint(&mut self, n: u8) {
         if let Some((v, c)) = self.group_values(n) {
             self.setpoint.vset_input = v;
             self.setpoint.cset_input = c;
             self.setpoint.dirty = true;
         }
-        self.selected_profile = n;
     }
 
-    /// Salva o Vset/Iset atualmente editado no grupo de memória `n` (1..6).
-    pub fn save_profile(&mut self, n: u8) {
-        self.send(AppCommand::SaveProfile(
-            n,
-            self.setpoint.vset_input,
-            self.setpoint.cset_input,
-        ));
-        self.selected_profile = n;
+    /// Valida e envia os seis valores do quadro para a memória selecionada.
+    ///
+    /// Sem conexão ou com algum valor inválido, nada é enviado e os erros voltam para a tela.
+    /// A escrita de OVP/OCP/OPP/OTP é experimental (ainda não confirmada em aparelho real);
+    /// por isso a gravação é conferida pela leitura seguinte (`check_save_status`).
+    pub fn save_memory_setup(&mut self) -> Result<(), Vec<SetupError>> {
+        if !self.is_connected() {
+            return Err(Vec::new());
+        }
+        let values = self.memory_setup.validate(self.selected_profile)?;
+        self.send(AppCommand::SaveMemorySetup(values));
+        self.memory_setup.clear_dirty();
+        self.pending_switch = None;
+        self.save_status = SaveStatus::Verifying {
+            expected: values,
+            reads_left: SAVE_VERIFY_READS,
+        };
+        Ok(())
     }
 
     pub fn toggle_output(&mut self) {
@@ -348,6 +442,9 @@ impl AppState {
 
     fn reset_telemetry(&mut self) {
         self.state = DPSUpdate::default();
+        self.memory_setup = MemorySetup::default();
+        self.pending_switch = None;
+        self.save_status = SaveStatus::Idle;
         self.clock = OutputClock::default();
         self.history.clear();
     }
@@ -430,6 +527,66 @@ impl AppState {
         }
     }
 
+    /// Sem edição pendente, o quadro acompanha a fonte: Vset/Iset da memória selecionada e as
+    /// proteções do aparelho. Durante a conferência de uma gravação ele não muda, para não voltar
+    /// aos valores antigos antes de a fonte devolver os novos.
+    fn sync_memory_setup(&mut self) {
+        if self.memory_setup.is_dirty() || matches!(self.save_status, SaveStatus::Verifying { .. })
+        {
+            return;
+        }
+        let group = self.group_values(self.selected_profile);
+        let s = &self.state;
+        let values = [
+            (SetupField::Vset, group.map(|g| g.0)),
+            (SetupField::Iset, group.map(|g| g.1)),
+            (SetupField::Ovp, s.ovp),
+            (SetupField::Ocp, s.ocp),
+            (SetupField::Opp, s.opp),
+            (SetupField::Otp, s.otp),
+        ];
+        for (field, value) in values {
+            self.memory_setup.load(field, value);
+        }
+    }
+
+    /// Compara uma leitura completa (a que traz as proteções) com o que foi salvo.
+    /// Leituras parciais não contam; depois de `SAVE_VERIFY_READS` leituras diferentes, desiste.
+    fn check_save_status(&mut self, update: &DPSUpdate) {
+        let SaveStatus::Verifying {
+            expected,
+            reads_left,
+        } = self.save_status
+        else {
+            return;
+        };
+        if update.ovp.is_none() {
+            return;
+        }
+        let group = group_of(update, expected.group);
+        let read = |field: SetupField| match field {
+            SetupField::Vset => group.map(|g| g.0),
+            SetupField::Iset => group.map(|g| g.1),
+            SetupField::Ovp => update.ovp,
+            SetupField::Ocp => update.ocp,
+            SetupField::Opp => update.opp,
+            SetupField::Otp => update.otp,
+        };
+        let matches = SetupField::ALL
+            .iter()
+            .all(|&f| read(f).is_some_and(|v| (v - expected.get(f)).abs() <= f.tolerance()));
+        self.save_status = if matches {
+            SaveStatus::Confirmed
+        } else if reads_left <= 1 {
+            SaveStatus::NotConfirmed
+        } else {
+            SaveStatus::Verifying {
+                expected,
+                reads_left: reads_left - 1,
+            }
+        };
+    }
+
     /// Estado conectado ligado a canais de teste, sem thread nem porta serial.
     #[cfg(test)]
     fn with_test_session() -> (Self, Receiver<AppCommand>, Sender<SerialEvent>) {
@@ -440,6 +597,19 @@ impl AppState {
         app.events = Some(evt_rx);
         app.connection = ConnectionState::Connected;
         (app, cmd_rx, evt_tx)
+    }
+}
+
+/// Vset/Iset do grupo de memória `n` (1..6) numa leitura, se ambos vieram.
+fn group_of(update: &DPSUpdate, n: u8) -> Option<(f32, f32)> {
+    match n {
+        1 => Some((update.g1_vset?, update.g1_cset?)),
+        2 => Some((update.g2_vset?, update.g2_cset?)),
+        3 => Some((update.g3_vset?, update.g3_cset?)),
+        4 => Some((update.g4_vset?, update.g4_cset?)),
+        5 => Some((update.g5_vset?, update.g5_cset?)),
+        6 => Some((update.g6_vset?, update.g6_cset?)),
+        _ => None,
     }
 }
 
@@ -469,8 +639,77 @@ mod tests {
         assert!(!app.setpoint().is_dirty());
     }
 
+    /// Leitura completa de uma fonte com a memória 2 em 5 V / 0,5 A e as proteções do aparelho.
+    fn full_read(f: impl FnOnce(&mut DPSUpdate)) -> SerialEvent {
+        update(|u| {
+            u.g2_vset = Some(5.0);
+            u.g2_cset = Some(0.5);
+            u.g3_vset = Some(12.0);
+            u.g3_cset = Some(1.5);
+            u.ovp = Some(36.0);
+            u.ocp = Some(2.5);
+            u.opp = Some(295.2);
+            u.otp = Some(60.0);
+            f(u);
+        })
+    }
+
+    fn fill_valid(app: &mut AppState) {
+        for (f, v) in [
+            (SetupField::Vset, 5.0),
+            (SetupField::Iset, 0.5),
+            (SetupField::Ovp, 36.0),
+            (SetupField::Ocp, 2.5),
+            (SetupField::Opp, 295.2),
+            (SetupField::Otp, 60.0),
+        ] {
+            app.set_setup_field(f, v);
+        }
+    }
+
     #[test]
-    fn carregar_memoria_nao_envia_comandos() {
+    fn selecionar_memoria_mostra_os_seis_valores_sem_enviar_nada() {
+        let (mut app, cmds, events) = AppState::with_test_session();
+        events.send(full_read(|_| {})).unwrap();
+        app.poll_events();
+
+        app.select_memory(2);
+        let m = app.memory_setup();
+        assert_eq!(m.get(SetupField::Vset), Some(5.0));
+        assert_eq!(m.get(SetupField::Iset), Some(0.5));
+        assert_eq!(m.get(SetupField::Ovp), Some(36.0));
+        assert_eq!(m.get(SetupField::Ocp), Some(2.5));
+        assert_eq!(m.get(SetupField::Opp), Some(295.2));
+        assert_eq!(m.get(SetupField::Otp), Some(60.0));
+        assert_eq!(app.selected_profile(), 2);
+
+        app.select_memory(3);
+        assert_eq!(app.memory_setup().get(SetupField::Vset), Some(12.0));
+        assert_eq!(app.memory_setup().get(SetupField::Ovp), Some(36.0));
+        assert!(cmds.try_recv().is_err());
+    }
+
+    #[test]
+    fn memoria_sem_dado_deixa_vset_e_iset_vazios() {
+        let (mut app, _cmds, events) = AppState::with_test_session();
+        events.send(full_read(|_| {})).unwrap();
+        app.poll_events();
+        app.select_memory(4);
+        assert_eq!(app.memory_setup().get(SetupField::Vset), None);
+        assert_eq!(app.memory_setup().get(SetupField::Iset), None);
+        assert_eq!(app.memory_setup().get(SetupField::Otp), Some(60.0));
+    }
+
+    #[test]
+    fn memoria_invalida_e_ignorada() {
+        let mut app = AppState::new();
+        app.select_memory(0);
+        app.select_memory(7);
+        assert_eq!(app.selected_profile(), 1);
+    }
+
+    #[test]
+    fn usar_memoria_no_setpoint_nao_envia_comandos() {
         let (mut app, cmds, events) = AppState::with_test_session();
         events
             .send(update(|u| {
@@ -480,16 +719,183 @@ mod tests {
             .unwrap();
         app.poll_events();
 
-        app.load_profile(2);
+        app.use_memory_in_setpoint(2);
         assert_eq!(app.setpoint().vset_input, 12.0);
         assert_eq!(app.setpoint().cset_input, 1.5);
         assert!(app.setpoint().is_dirty());
-        assert_eq!(app.selected_profile(), 2);
         assert!(cmds.try_recv().is_err());
     }
 
     #[test]
-    fn aplicar_e_salvar_enviam_os_valores_dos_campos() {
+    fn edicao_do_setup_e_preservada_e_desfazer_volta_a_fonte() {
+        let (mut app, cmds, events) = AppState::with_test_session();
+        events.send(full_read(|_| {})).unwrap();
+        app.poll_events();
+        app.select_memory(2);
+
+        app.set_setup_field(SetupField::Ovp, 30.0);
+        assert!(app.memory_setup().is_dirty());
+        events.send(full_read(|_| {})).unwrap();
+        app.poll_events();
+        assert_eq!(app.memory_setup().get(SetupField::Ovp), Some(30.0));
+
+        app.discard_memory_setup_edits();
+        assert!(!app.memory_setup().is_dirty());
+        assert_eq!(app.memory_setup().get(SetupField::Ovp), Some(36.0));
+        assert!(cmds.try_recv().is_err());
+    }
+
+    #[test]
+    fn trocar_de_memoria_com_pendencia_pede_confirmacao() {
+        let (mut app, cmds, events) = AppState::with_test_session();
+        events.send(full_read(|_| {})).unwrap();
+        app.poll_events();
+        app.select_memory(2);
+        app.set_setup_field(SetupField::Vset, 7.0);
+
+        app.request_select_memory(3);
+        assert_eq!(app.pending_switch(), Some(3));
+        assert_eq!(app.selected_profile(), 2);
+        assert_eq!(app.memory_setup().get(SetupField::Vset), Some(7.0));
+
+        app.cancel_switch();
+        assert_eq!(app.pending_switch(), None);
+        assert!(app.memory_setup().is_dirty());
+
+        app.request_select_memory(3);
+        app.confirm_switch();
+        assert_eq!(app.selected_profile(), 3);
+        assert_eq!(app.memory_setup().get(SetupField::Vset), Some(12.0));
+        assert!(!app.memory_setup().is_dirty());
+
+        // Sem pendência, a troca é direta.
+        app.request_select_memory(2);
+        assert_eq!(app.selected_profile(), 2);
+        assert_eq!(app.pending_switch(), None);
+        assert!(cmds.try_recv().is_err());
+    }
+
+    #[test]
+    fn salvar_valido_envia_um_comando_e_limpa_a_pendencia() {
+        let (mut app, cmds, _events) = AppState::with_test_session();
+        app.select_memory(2);
+        fill_valid(&mut app);
+
+        assert_eq!(app.save_memory_setup(), Ok(()));
+        let esperado = SetupValues {
+            group: 2,
+            vset: 5.0,
+            iset: 0.5,
+            ovp: 36.0,
+            ocp: 2.5,
+            opp: 295.2,
+            otp: 60.0,
+        };
+        assert_eq!(cmds.try_recv(), Ok(AppCommand::SaveMemorySetup(esperado)));
+        assert!(cmds.try_recv().is_err());
+        assert!(!app.memory_setup().is_dirty());
+        assert!(matches!(app.save_status(), SaveStatus::Verifying { .. }));
+    }
+
+    #[test]
+    fn salvar_invalido_ou_sem_conexao_nao_envia_nada() {
+        let (mut app, cmds, _events) = AppState::with_test_session();
+        fill_valid(&mut app);
+        app.set_setup_field(SetupField::Vset, 12.0);
+        app.set_setup_field(SetupField::Ovp, 10.0);
+        assert_eq!(app.save_memory_setup(), Err(vec![SetupError::VsetAboveOvp]));
+        assert!(cmds.try_recv().is_err());
+        assert!(app.memory_setup().is_dirty());
+
+        app.set_setup_field(SetupField::Vset, 36.5);
+        assert_eq!(
+            app.save_memory_setup(),
+            Err(vec![SetupError::AboveMax(SetupField::Vset)])
+        );
+        assert!(cmds.try_recv().is_err());
+
+        let mut offline = AppState::new();
+        fill_valid(&mut offline);
+        assert!(offline.save_memory_setup().is_err());
+    }
+
+    #[test]
+    fn salvar_aceita_os_seis_maximos() {
+        let (mut app, cmds, _events) = AppState::with_test_session();
+        for f in SetupField::ALL {
+            app.set_setup_field(f, f.max());
+        }
+        assert_eq!(app.save_memory_setup(), Ok(()));
+        assert!(matches!(
+            cmds.try_recv(),
+            Ok(AppCommand::SaveMemorySetup(v)) if v.vset == 36.0 && v.iset == 8.2 && v.opp == 295.2
+        ));
+    }
+
+    #[test]
+    fn leitura_igual_confirma_a_gravacao() {
+        let (mut app, _cmds, events) = AppState::with_test_session();
+        app.select_memory(2);
+        fill_valid(&mut app);
+        app.save_memory_setup().unwrap();
+
+        // Leitura parcial (sem proteções) não conta.
+        events.send(update(|u| u.temperature = Some(30.0))).unwrap();
+        app.poll_events();
+        assert!(matches!(
+            app.save_status(),
+            SaveStatus::Verifying { reads_left: 3, .. }
+        ));
+
+        // Dentro da tolerância de meio passo (0,004 V < 0,005 V).
+        events.send(full_read(|u| u.g2_vset = Some(5.004))).unwrap();
+        app.poll_events();
+        assert_eq!(app.save_status(), SaveStatus::Confirmed);
+        assert_eq!(app.memory_setup().get(SetupField::Ovp), Some(36.0));
+    }
+
+    #[test]
+    fn tres_leituras_diferentes_nao_confirmam() {
+        let (mut app, _cmds, events) = AppState::with_test_session();
+        app.select_memory(2);
+        fill_valid(&mut app);
+        app.save_memory_setup().unwrap();
+
+        for _ in 0..3 {
+            events.send(full_read(|u| u.ovp = Some(30.0))).unwrap();
+            app.poll_events();
+        }
+        assert_eq!(app.save_status(), SaveStatus::NotConfirmed);
+        // Sem pendência, o quadro volta a mostrar o que a fonte tem.
+        assert_eq!(app.memory_setup().get(SetupField::Ovp), Some(30.0));
+    }
+
+    #[test]
+    fn durante_a_conferencia_o_quadro_nao_volta_ao_valor_antigo() {
+        let (mut app, _cmds, events) = AppState::with_test_session();
+        events.send(full_read(|_| {})).unwrap();
+        app.poll_events();
+        app.select_memory(2);
+        app.set_setup_field(SetupField::Ocp, 3.0);
+        app.save_memory_setup().unwrap();
+
+        events.send(full_read(|_| {})).unwrap(); // leitura antiga (ocp = 2,5)
+        app.poll_events();
+        assert_eq!(app.memory_setup().get(SetupField::Ocp), Some(3.0));
+    }
+
+    #[test]
+    fn aplicar_envia_os_maximos_do_setpoint() {
+        let (mut app, cmds, _events) = AppState::with_test_session();
+        app.setpoint_mut().vset_input = 36.0;
+        app.setpoint_mut().cset_input = 8.2;
+        app.apply_setpoints();
+        assert_eq!(cmds.try_recv(), Ok(AppCommand::SetVoltage(36.0)));
+        assert_eq!(cmds.try_recv(), Ok(AppCommand::SetCurrent(8.2)));
+    }
+
+    #[test]
+    fn aplicar_envia_os_valores_dos_campos() {
         let (mut app, cmds, _events) = AppState::with_test_session();
         app.setpoint_mut().vset_input = 5.0;
         app.setpoint_mut().cset_input = 0.2;
@@ -499,10 +905,6 @@ mod tests {
         assert_eq!(cmds.try_recv(), Ok(AppCommand::SetVoltage(5.0)));
         assert_eq!(cmds.try_recv(), Ok(AppCommand::SetCurrent(0.2)));
         assert!(!app.setpoint().is_dirty());
-
-        app.save_profile(3);
-        assert_eq!(cmds.try_recv(), Ok(AppCommand::SaveProfile(3, 5.0, 0.2)));
-        assert_eq!(app.selected_profile(), 3);
     }
 
     #[test]

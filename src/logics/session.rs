@@ -1,6 +1,9 @@
 //! Sessão de comunicação com a fonte, numa thread própria.
 
-use super::protocol::{DPS150, DPSUpdate, commands};
+use super::{
+    memory_setup::SetupValues,
+    protocol::{DPS150, DPSUpdate, commands},
+};
 use std::{
     io::{Read, Write},
     sync::mpsc::{self, Receiver, Sender},
@@ -16,7 +19,8 @@ pub enum AppCommand {
     SetVoltage(f32),
     SetCurrent(f32),
     EnableOutput(bool),
-    SaveProfile(u8, f32, f32),
+    /// Grava OVP/OCP/OPP/OTP e Vset/Iset do grupo, e relê a fonte.
+    SaveMemorySetup(SetupValues),
     SetPollInterval(Duration),
     Disconnect,
 }
@@ -47,6 +51,27 @@ pub fn available_ports() -> Vec<String> {
     serialport::available_ports()
         .map(|ports| ports.into_iter().map(|p| p.port_name).collect())
         .unwrap_or_default()
+}
+
+/// Pacotes que gravam o setup de uma memória, na ordem de envio: proteções (OVP, OCP, OPP, OTP),
+/// Vset e Iset do grupo, e uma releitura (`GET ALL`) para a interface conferir a gravação.
+///
+/// A escrita das proteções é experimental: ainda não foi confirmada em aparelho real.
+fn memory_setup_packets(power_supply: &DPS150, v: &SetupValues) -> Vec<Vec<u8>> {
+    let mut packets = vec![
+        power_supply.set_float_value(commands::OVP, v.ovp),
+        power_supply.set_float_value(commands::OCP, v.ocp),
+        power_supply.set_float_value(commands::OPP, v.opp),
+        power_supply.set_float_value(commands::OTP, v.otp),
+    ];
+    if let Some(id) = DPS150::group_voltage_id(v.group) {
+        packets.push(power_supply.set_float_value(id, v.vset));
+    }
+    if let Some(id) = DPS150::group_current_id(v.group) {
+        packets.push(power_supply.set_float_value(id, v.iset));
+    }
+    packets.push(power_supply.get_all());
+    packets
 }
 
 fn session_main(
@@ -99,12 +124,10 @@ fn session_main(
                 AppCommand::EnableOutput(en) => {
                     let _ = port.write_all(&power_supply.enable_output(en));
                 }
-                AppCommand::SaveProfile(n, v, c) => {
-                    if let Some(vid) = DPS150::group_voltage_id(n) {
-                        let _ = port.write_all(&power_supply.set_float_value(vid, v));
-                    }
-                    if let Some(cid) = DPS150::group_current_id(n) {
-                        let _ = port.write_all(&power_supply.set_float_value(cid, c));
+                AppCommand::SaveMemorySetup(values) => {
+                    for packet in memory_setup_packets(&power_supply, &values) {
+                        let _ = port.write_all(&packet);
+                        thread::sleep(Duration::from_millis(100));
                     }
                 }
                 AppCommand::SetPollInterval(interval) => poll_interval = interval,
@@ -131,5 +154,46 @@ fn session_main(
             let _ = port.write_all(&power_supply.get_all());
             last_poll = Instant::now();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn values(group: u8) -> SetupValues {
+        SetupValues {
+            group,
+            vset: 5.0,
+            iset: 0.5,
+            ovp: 36.0,
+            ocp: 2.5,
+            opp: 295.2,
+            otp: 60.0,
+        }
+    }
+
+    #[test]
+    fn pacotes_do_setup_seguem_a_ordem_do_contrato() {
+        let ps = DPS150::new();
+        let packets = memory_setup_packets(&ps, &values(2));
+        let esperado = vec![
+            ps.set_float_value(commands::OVP, 36.0),
+            ps.set_float_value(commands::OCP, 2.5),
+            ps.set_float_value(commands::OPP, 295.2),
+            ps.set_float_value(commands::OTP, 60.0),
+            ps.set_float_value(commands::GROUP2_VOLTAGE_SET, 5.0),
+            ps.set_float_value(commands::GROUP2_CURRENT_SET, 0.5),
+            ps.get_all(),
+        ];
+        assert_eq!(packets, esperado);
+    }
+
+    #[test]
+    fn grupo_sem_type_id_nao_envia_vset_e_iset() {
+        let ps = DPS150::new();
+        let packets = memory_setup_packets(&ps, &values(9));
+        assert_eq!(packets.len(), 5);
+        assert_eq!(packets.last(), Some(&ps.get_all()));
     }
 }

@@ -32,6 +32,7 @@ nele.
 | [`logics/session.rs`](../src/logics/session.rs) | **Sessão serial**: a thread que abre a porta, inicializa a fonte, executa comandos e repassa o que a fonte responde. Também lista as portas disponíveis | Guardar o estado da aplicação, decidir regras de setpoint, conhecer a interface (pede redesenho por um `notify` recebido) |
 | [`logics/app.rs`](../src/logics/app.rs) | **Estado e regras** (`AppState`): conexão, edição do setpoint, memórias M1–M6, relógio de saída, histórico e intervalo de leitura | Desenhar, falar direto com a porta (usa canais), usar egui |
 | [`logics/history.rs`](../src/logics/history.rs) | Histórico limitado das amostras (V, A, W) usado pelo gráfico | Decidir o que amostrar, conhecer a fonte |
+| [`logics/memory_setup.rs`](../src/logics/memory_setup.rs) | **Setup das memórias**: os seis campos (Vset, Iset, OVP, OCP, OPP, OTP), seus máximos, a edição pendente e a validação | Desenhar, enviar à fonte, usar egui |
 | [`logics/scale.rs`](../src/logics/scale.rs) | Calcula o topo e as casas decimais da escala de cada grandeza do gráfico | Desenhar |
 | [`logics/format.rs`](../src/logics/format.rs) | Formata durações como texto ("01:02:03", "2.5 min") | Qualquer outra formatação |
 | [`gui/mod.rs`](../src/gui/mod.rs) | `GuiApp`: o ciclo de cada quadro e o layout em colunas (controle à esquerda, gráfico à direita) | Regra de negócio |
@@ -49,7 +50,8 @@ efeitos e como funciona):
 [`gui::widgets`](modulos/gui-widgets.md) ·
 [`logics::app`](modulos/logics-app.md) · [`logics::protocol`](modulos/logics-protocol.md) ·
 [`logics::session`](modulos/logics-session.md) · [`logics::history`](modulos/logics-history.md) ·
-[`logics::scale`](modulos/logics-scale.md) · [`logics::format`](modulos/logics-format.md).
+[`logics::memory_setup`](modulos/logics-memory_setup.md) · [`logics::scale`](modulos/logics-scale.md) ·
+[`logics::format`](modulos/logics-format.md).
 As constantes de `gui::theme` estão em [`gui`](modulos/gui-mod.md#constantes-de-theme).
 
 ## Dependências entre módulos
@@ -71,6 +73,7 @@ flowchart LR
     APP["app (AppState)"]
     SESSION["session"]
     HISTORY["history"]
+    MSETUP["memory_setup"]
     PROTOCOL["protocol"]
     SCALE["scale"]
     FORMAT["format"]
@@ -91,6 +94,10 @@ flowchart LR
   CHART --> HISTORY
   APP --> SESSION
   APP --> HISTORY
+  APP --> MSETUP
+  PANELS --> MSETUP
+  WIDGETS --> MSETUP
+  SESSION --> MSETUP
   APP --> PROTOCOL
   SESSION --> PROTOCOL
 ```
@@ -158,10 +165,25 @@ sequenceDiagram
 Dois detalhes importam aqui:
 
 - **Nada é enviado antes de "Aplicar".** Editar os campos só marca a edição como pendente
-  (`mark_setpoint_edited`). Carregar uma memória (M1–M6) também só preenche os campos. O envio exige a
-  ação explícita.
+  (`mark_setpoint_edited`). Selecionar uma memória (M1–M6) só mostra os valores dela no quadro de setup, e
+  "Usar no setpoint" só preenche os campos do setpoint. O envio exige a ação explícita.
 - **A edição pendente é protegida.** Enquanto ela existir, os dados que chegam da fonte não sobrescrevem o
   que o usuário digitou (`AppState::sync_edit_buffers`).
+
+### O caminho do botão Salvar
+
+O quadro de setup das memórias segue o mesmo caminho, com mais cuidados porque grava OVP, OCP, OPP e OTP (a
+escrita delas é experimental):
+
+1. `gui::panels` chama `AppState::save_memory_setup()`.
+2. `AppState` pede a [`MemorySetup::validate`](modulos/logics-memory_setup.md): máximos de cada campo,
+   Vset ≤ OVP e Iset ≤ OCP. Havendo erro, **nada** é enviado.
+3. Sem erro, `AppState` coloca `AppCommand::SaveMemorySetup(valores)` no canal e passa a conferir a gravação
+   (`SaveStatus::Verifying`).
+4. `session_main` escreve, com 100 ms entre os pacotes: OVP, OCP, OPP, OTP, o Vset e o Iset do grupo e um
+   `GET ALL` (`memory_setup_packets`).
+5. A leitura que volta é comparada com o que foi enviado (`AppState::check_save_status`): a tela mostra
+   "gravado" ou, depois de 3 leituras diferentes, "não confirmado".
 
 ## Ciclo de vida da sessão serial
 
@@ -268,9 +290,11 @@ com instantes escolhidos pelo teste, sem esperar tempo real.
 | `ConnectionState` | `logics::app` | `Disconnected`, `Connecting`, `Connected` ou `Error(mensagem)` (máquina de estados acima) |
 | `SetpointEditor` | `logics::app` | Os valores de tensão e corrente em edição (`vset_input`, `cset_input`), se há alteração pendente e se algum campo está em foco |
 | `OutputClock` | `logics::app` | O tempo com a saída ligada: conta enquanto ligada, congela ao desligar, zera ao ligar de novo |
+| `SetupField`, `SetupValues`, `MemorySetup` | `logics::memory_setup` | Os seis campos do quadro de setup (Vset, Iset, OVP, OCP, OPP, OTP) com seus máximos, os valores validados prontos para envio (com o grupo) e os valores em edição com a marca de pendência |
+| `SaveStatus` | `logics::app` | A situação da última gravação do setup: `Idle`, `Verifying`, `Confirmed` ou `NotConfirmed` |
 | `History` e `Sample` | `logics::history` | Fila de no máximo 300 amostras (`voltage`, `current`, `power`) usada pelo gráfico |
 | `AxisScale` | `logics::scale` | O topo (`max`) e as casas decimais (`decimals`) da escala de uma grandeza |
-| `AppCommand` | `logics::session` | O que a interface pede à sessão: `SetVoltage`, `SetCurrent`, `EnableOutput`, `SaveProfile`, `SetPollInterval`, `Disconnect` |
+| `AppCommand` | `logics::session` | O que a interface pede à sessão: `SetVoltage`, `SetCurrent`, `EnableOutput`, `SaveMemorySetup`, `SetPollInterval`, `Disconnect` |
 | `SerialEvent` | `logics::session` | O que a sessão avisa à interface: `Update`, `Connected`, `Error` |
 | `DPSUpdate` | `logics::protocol` | Uma atualização vinda da fonte. Todos os campos são opcionais (medições, setpoints, memórias, proteções, modo CC/CV, saída, acumuladores, identificação) |
 | `GuiApp` | `gui` | A aplicação gráfica: um `AppState` e as três cores escolhidas para V, A e W |
@@ -285,8 +309,8 @@ Estas regras mantêm a separação entre as camadas. Quem altera o código deve 
 - **Nenhuma E/S serial roda na thread da interface.** Só `session_main`, na sua própria thread.
 - **O relógio entra por parâmetro.** As regras recebem `now: Instant` em vez de chamar `Instant::now()`,
   para os testes não dependerem do tempo real.
-- **Nenhum comando é enviado sem ação explícita.** Só `apply_setpoints`, `save_profile`, `toggle_output`,
-  `set_update_ms` e `disconnect` enviam algo à fonte. Selecionar, carregar uma memória ou editar um campo
+- **Nenhum comando é enviado sem ação explícita.** Só `apply_setpoints`, `save_memory_setup`, `toggle_output`,
+  `set_update_ms` e `disconnect` enviam algo à fonte. Selecionar uma memória, usá-la no setpoint ou editar um campo
   não envia nada.
 - **Memória e histórico são limitados.** O histórico guarda no máximo 300 amostras e o buffer do protocolo é
   descartado quando passa de 1024 bytes sem formar pacote.

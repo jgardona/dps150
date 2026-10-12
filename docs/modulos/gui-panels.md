@@ -45,10 +45,10 @@ vem sempre dele. As cores das grandezas chegam por parâmetro (`colors`), na ord
 | **Propósito** | Montar a coluna de controle, de cima para baixo. |
 | **Entradas** | `ui`: a área da coluna. `app`: o estado. `colors`: as cores de V, A e W. |
 | **Saída** | nada |
-| **Efeitos** | Os de `setpoint_card` e `output_button`. |
+| **Efeitos** | Os de `setpoint_card`, `setup_card` e `output_button`. |
 
-**Como funciona**: desenha as leituras (`readouts`), um espaço de 8 px e o card de setpoint
-(`setpoint_card`). Em seguida, num trecho que cresce **de baixo para cima**, desenha o botão de saída
+**Como funciona**: desenha as leituras (`readouts`), um espaço de 8 px, o card de setpoint
+(`setpoint_card`), outro espaço de 8 px e o quadro de setup da memória (`setup_card`). Em seguida, num trecho que cresce **de baixo para cima**, desenha o botão de saída
 (`output_button`), que fica assim encostado no fim da coluna.
 
 ### `readouts`
@@ -80,15 +80,44 @@ aparece na leitura de tensão se a fonte está em `CV` e na de corrente se está
 **Como funciona**: o card tem quatro partes:
 
 1. **Título** "Setpoint", com o aviso "• não aplicado" quando `setpoint().is_dirty()`.
-2. **Campos**: dois campos numéricos arrastáveis, V (de 0 a 30, 2 casas) e A (de 0 a 5, 3 casas), que editam
+2. **Campos**: dois campos numéricos arrastáveis, V (de 0 a 36,00, 2 casas) e A (de 0 a 8,200, 3 casas), com os máximos
+   `VSET_MAX` e `ISET_MAX` de [`memory_setup`](logics-memory_setup.md), que editam
    direto `setpoint_mut().vset_input` e `cset_input`. Se algum mudou, chama `mark_setpoint_edited()`. Informa
    a `set_editing(...)` quais campos estão em foco ou sendo arrastados. Se o foco saiu de um campo por causa
    da tecla **Enter**, guarda isso para o botão Aplicar.
 3. **Botões**: **Aplicar** (habilitado só conectado; azul quando há pendência) chama `apply_setpoints()`, assim
    como o Enter; **Desfazer** (só aparece com pendência) chama `discard_setpoint_edits()`.
-4. **Memórias**: um botão M1 a M6 por grupo. Clicar chama `load_profile(n)`, que só preenche os campos. Ao
-   passar o mouse, mostra os valores salvos (ou "sem dados"). **Salvar** (habilitado só conectado) chama
-   `save_profile(n)` para a memória selecionada.
+4. **Memórias**: um botão M1 a M6 por grupo. Clicar chama `request_select_memory(n)`, que mostra a memória no
+   quadro de setup (veja `setup_card`) e, se há edição pendente, pede confirmação antes de trocar. Ao passar o
+   mouse, mostra os valores salvos (ou "sem dados"). **Salvar** chama `save_memory_setup()` e só fica habilitado
+   conectado e com os seis valores do quadro válidos; sem isso, a dica mostra o primeiro erro.
+
+### `setup_card`
+
+*(interna)*
+
+| | |
+|---|---|
+| **Propósito** | Desenhar o quadro de setup da memória selecionada: Vset, Iset, OVP, OCP, OPP e OTP, em duas linhas de três. |
+| **Entradas** | `ui`: a área. `app`: o estado. `colors`: as cores de V, A e W para os rótulos. |
+| **Saída** | nada |
+| **Efeitos** | Edita o quadro, descarta a edição, confirma ou cancela uma troca de memória e carrega a memória no setpoint. **Nunca envia nada à fonte** (quem envia é o **Salvar**, em `setpoint_card`). |
+
+**Como funciona**:
+
+1. **Título** "Setup Mn" com "• não salvo" quando há edição pendente.
+2. **Grade** de três colunas com `setup_field` para cada campo, na ordem do visor. As cores são a de V (Vset e
+   OVP), a de A (Iset e OCP) e a de W (OPP); OTP não tem cor. As edições são anotadas durante o desenho e
+   aplicadas só no fim (`set_setup_field`), porque o quadro lê o estado enquanto desenha.
+3. **Erros**: com edição pendente, valida os seis valores; os campos com erro ficam vermelhos e as três primeiras
+   mensagens aparecem embaixo. Sem edição pendente, não mostra erro (um campo vazio, antes de a fonte informar,
+   não é um erro do usuário).
+4. **Troca de memória em espera**: se `pending_switch()` tem um pedido, mostra "Descartar as alterações de Mn?"
+   com **Descartar** (`confirm_switch`) e **Continuar editando** (`cancel_switch`).
+5. **Botões e estado**: **Usar no setpoint** (conectado e com dados; chama `use_memory_in_setpoint`), **Desfazer**
+   (só com pendência; chama `discard_memory_setup_edits`) e o estado da gravação: "verificando…", "gravado" (verde)
+   ou "não confirmado" (vermelho).
+6. **Rodapé**: "* vale para o aparelho todo", porque OVP, OCP, OPP e OTP não são guardados por memória.
 
 ### `output_button`
 

@@ -2,11 +2,12 @@
 
 use super::{
     theme::{ACTION_COLOR, ERROR_COLOR, OK_COLOR, WARN_COLOR},
-    widgets::{ReadoutRow, card, info_pair, status_dot},
+    widgets::{ReadoutRow, card, info_pair, setup_field, status_dot},
 };
 use crate::logics::{
-    app::{AppState, ConnectionState},
+    app::{AppState, ConnectionState, SaveStatus},
     format::format_hhmmss,
+    memory_setup::{ISET_MAX, SetupField, VSET_MAX},
 };
 use eframe::egui::{self, Color32};
 use std::time::Instant;
@@ -87,6 +88,8 @@ pub(crate) fn control_column(ui: &mut egui::Ui, app: &mut AppState, colors: &[Co
     readouts(ui, app, colors);
     ui.add_space(8.0);
     setpoint_card(ui, app, colors);
+    ui.add_space(8.0);
+    setup_card(ui, app, colors);
     ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
         output_button(ui, app);
     });
@@ -132,7 +135,7 @@ fn setpoint_card(ui: &mut egui::Ui, app: &mut AppState, colors: &[Color32; 3]) {
             let v_resp = ui.add(
                 egui::DragValue::new(&mut app.setpoint_mut().vset_input)
                     .speed(0.05)
-                    .range(0.0..=30.0)
+                    .range(0.0..=VSET_MAX)
                     .fixed_decimals(2)
                     .suffix(" V"),
             );
@@ -141,7 +144,7 @@ fn setpoint_card(ui: &mut egui::Ui, app: &mut AppState, colors: &[Color32; 3]) {
             let c_resp = ui.add(
                 egui::DragValue::new(&mut app.setpoint_mut().cset_input)
                     .speed(0.01)
-                    .range(0.0..=5.0)
+                    .range(0.0..=ISET_MAX)
                     .fixed_decimals(3)
                     .suffix(" A"),
             );
@@ -187,7 +190,7 @@ fn setpoint_card(ui: &mut egui::Ui, app: &mut AppState, colors: &[Color32; 3]) {
             ui.label("Memória");
             for n in 1..=6u8 {
                 let hover = match app.group_values(n) {
-                    Some((v, c)) => format!("M{n}: {v:.2} V / {c:.3} A — clique para carregar"),
+                    Some((v, c)) => format!("M{n}: {v:.2} V / {c:.3} A — clique para ver no setup"),
                     None => format!("M{n}: sem dados"),
                 };
                 if ui
@@ -195,19 +198,137 @@ fn setpoint_card(ui: &mut egui::Ui, app: &mut AppState, colors: &[Color32; 3]) {
                     .on_hover_text(hover)
                     .clicked()
                 {
-                    app.load_profile(n);
+                    app.request_select_memory(n);
                 }
             }
             let target = app.selected_profile();
+            let problem = app
+                .memory_setup()
+                .validate(target)
+                .err()
+                .and_then(|errors| errors.first().map(|e| e.message()));
+            let hover = problem.clone().unwrap_or_else(|| {
+                format!("Grava os seis valores do setup em M{target} (OVP, OCP, OPP e OTP valem para o aparelho todo)")
+            });
             if ui
-                .add_enabled(app.is_connected(), egui::Button::new("Salvar"))
-                .on_hover_text(format!("Salva os valores dos campos em M{target}"))
+                .add_enabled(
+                    app.is_connected() && problem.is_none(),
+                    egui::Button::new("Salvar"),
+                )
+                .on_hover_text(hover)
                 .clicked()
             {
-                app.save_profile(target);
+                // O botão só fica habilitado com valores válidos; qualquer erro já está na tela.
+                let _ = app.save_memory_setup();
             }
         });
     });
+}
+
+/// Quadro de setup da memória selecionada: Vset, Iset e as quatro proteções, em duas linhas de três.
+fn setup_card(ui: &mut egui::Ui, app: &mut AppState, colors: &[Color32; 3]) {
+    let memory = app.selected_profile();
+    let dirty = app.memory_setup().is_dirty();
+    let connected = app.is_connected();
+    let errors = if dirty {
+        app.memory_setup()
+            .validate(memory)
+            .err()
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let mut edit = None;
+
+    card(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(format!("Setup M{memory}")).strong());
+            if dirty {
+                ui.colored_label(WARN_COLOR, "\u{2022} não salvo");
+            }
+        });
+
+        egui::Grid::new("setup_grid")
+            .num_columns(3)
+            .spacing([14.0, 4.0])
+            .show(ui, |ui| {
+                for (i, field) in SetupField::ALL.into_iter().enumerate() {
+                    let accent = match field {
+                        SetupField::Vset | SetupField::Ovp => Some(colors[0]),
+                        SetupField::Iset | SetupField::Ocp => Some(colors[1]),
+                        SetupField::Opp => Some(colors[2]),
+                        SetupField::Otp => None,
+                    };
+                    let invalid = errors.iter().any(|e| e.field() == Some(field));
+                    let value = app.memory_setup().get(field);
+                    if let Some(v) = setup_field(ui, field, value, accent, connected, invalid) {
+                        edit = Some((field, v));
+                    }
+                    if i % 3 == 2 {
+                        ui.end_row();
+                    }
+                }
+            });
+
+        for error in errors.iter().take(3) {
+            ui.colored_label(ERROR_COLOR, egui::RichText::new(error.message()).small());
+        }
+
+        if let Some(next) = app.pending_switch() {
+            ui.horizontal(|ui| {
+                ui.colored_label(WARN_COLOR, format!("Descartar as alterações de M{memory}?"));
+                if ui.button("Descartar").clicked() {
+                    app.confirm_switch();
+                }
+                if ui.button("Continuar editando").clicked() {
+                    app.cancel_switch();
+                }
+            })
+            .response
+            .on_hover_text(format!("Você pediu M{next}"));
+        }
+
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    connected && app.group_values(memory).is_some(),
+                    egui::Button::new("Usar no setpoint"),
+                )
+                .on_hover_text(
+                    "Carrega Vset/Iset da memória no card Setpoint; confirme com Aplicar",
+                )
+                .clicked()
+            {
+                app.use_memory_in_setpoint(memory);
+            }
+            if dirty && ui.button("Desfazer").clicked() {
+                app.discard_memory_setup_edits();
+            }
+            match app.save_status() {
+                SaveStatus::Idle => {}
+                SaveStatus::Verifying { .. } => {
+                    ui.weak("verificando\u{2026}");
+                }
+                SaveStatus::Confirmed => {
+                    ui.colored_label(OK_COLOR, "gravado");
+                }
+                SaveStatus::NotConfirmed => {
+                    ui.colored_label(ERROR_COLOR, "não confirmado")
+                        .on_hover_text("A fonte não devolveu os valores enviados");
+                }
+            }
+        });
+
+        ui.label(
+            egui::RichText::new("* vale para o aparelho todo")
+                .small()
+                .weak(),
+        );
+    });
+
+    if let Some((field, value)) = edit {
+        app.set_setup_field(field, value);
+    }
 }
 
 fn output_button(ui: &mut egui::Ui, app: &mut AppState) {

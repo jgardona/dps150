@@ -28,6 +28,7 @@ explicadas (propósito, entradas, saída, efeitos e como funcionam).
 | [logics-protocol.md](modulos/logics-protocol.md) | `src/logics/protocol.rs` | Protocolo da fonte: comandos, checksum e leitura do fluxo serial |
 | [logics-session.md](modulos/logics-session.md) | `src/logics/session.rs` | A thread da sessão serial e os canais de comandos e eventos |
 | [logics-history.md](modulos/logics-history.md) | `src/logics/history.rs` | O histórico limitado de amostras do gráfico |
+| [logics-memory_setup.md](modulos/logics-memory_setup.md) | `src/logics/memory_setup.rs` | Os seis campos de setup das memórias: máximos, edição pendente e validação |
 | [logics-scale.md](modulos/logics-scale.md) | `src/logics/scale.rs` | O cálculo das escalas dos eixos |
 | [logics-format.md](modulos/logics-format.md) | `src/logics/format.rs` | A formatação de durações |
 

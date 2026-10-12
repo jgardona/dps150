@@ -123,7 +123,7 @@ grande (type_id 255) que traz medições, setpoints, memórias, proteções, acu
 | **Efeitos** | nenhum |
 
 **Como funciona**: igual a `group_voltage_id`, com as constantes `GROUPn_CURRENT_SET`. A sessão usa as duas
-para gravar uma memória (`SaveProfile`).
+para gravar o Vset/Iset de uma memória (`SaveMemorySetup`).
 
 ### `DPS150::enable_output`
 

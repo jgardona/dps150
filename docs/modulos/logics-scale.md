@@ -6,7 +6,7 @@ Arquivo: [`src/logics/scale.rs`](../../src/logics/scale.rs) · Visão geral: [ar
 
 Decide **até onde vai o eixo** de cada grandeza no gráfico (o "topo" da escala) e **quantas casas
 decimais** os números dele precisam. O gráfico desenha tensão (V), corrente (A) e potência (W) na mesma
-área, mas cada uma tem a sua escala, porque as faixas são muito diferentes (por exemplo, 30 V contra 0,05 A).
+área, mas cada uma tem a sua escala, porque as faixas são muito diferentes (por exemplo, 36 V contra 0,05 A).
 Cada escala tem **4 divisões principais**, e cada divisão tem **4 subdivisões** (3 ticks intermediários).
 
 ## O que não faz

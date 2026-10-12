@@ -84,3 +84,14 @@ nele um círculo de raio 5 px na cor dada.
 **Como funciona**: cria uma `Ui` filha limitada a `rect` (`max_rect`) e com o layout "de cima para baixo,
 alinhado à esquerda". É a base do layout em duas colunas de [`GuiApp::ui`](gui-mod.md): uma `Ui` para a
 coluna de controle e outra para o gráfico.
+
+### `setup_field`
+
+| | |
+|---|---|
+| **Propósito** | Desenhar um campo do quadro de setup: rótulo pequeno em cima e valor editável embaixo. |
+| **Entradas** | `ui`: a área. `field`: o campo. `value`: o valor atual (`None` se a fonte não informou). `accent`: a cor do rótulo (V, A e W). `enabled`: se aceita edição. `invalid`: se está com erro. |
+| **Saída** | `Some(novo valor)` quando o usuário altera o campo; `None` caso contrário. |
+| **Efeitos** | nenhum além de desenhar; quem grava o valor é quem chama |
+
+**Como funciona**: empilha o rótulo (com `*` quando o campo vale para o aparelho todo) e o valor. O rótulo usa `accent`; se `invalid`, rótulo e valor ficam vermelhos. Sem valor, mostra "—" desabilitado. Com valor, usa um `DragValue` com faixa de 0 até o máximo do campo, **sem cortar** o que o usuário digita (`clamp_existing_to_range(false)`): assim um valor acima do máximo continua visível e a validação o marca em vermelho, em vez de ser trocado em silêncio. As casas decimais e a unidade são as do campo.

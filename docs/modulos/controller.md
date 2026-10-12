@@ -17,7 +17,7 @@ que ele acessa pela biblioteca `dps150`.
 | Constante | Valor | Uso |
 |---|---|---|
 | `WIDTH` | 1000 px | Largura inicial da janela |
-| `HEIGHT` | 540 px | Altura inicial da janela |
+| `HEIGHT` | 700 px | Altura inicial da janela (o quadro de setup das memórias precisou de mais espaço vertical) |
 
 ## Funções
 

@@ -101,7 +101,7 @@ O **modo de regulação** aparece como um selo na leitura correspondente:
 
 ### Setpoint
 
-O card **Setpoint** define a tensão (**V**, de 0 a 30 V) e o limite de corrente (**A**, de 0 a 5 A) da saída.
+O card **Setpoint** define a tensão (**V**, de 0 a 36,00 V) e o limite de corrente (**A**, de 0 a 8,200 A) da saída.
 
 - Para mudar um valor, arraste o campo com o mouse ou clique nele e digite.
 - Valores editados e ainda não enviados mostram o aviso **"• não aplicado"**. Enquanto o aviso estiver aparecendo, os campos param de acompanhar o valor lido do aparelho, para não apagar o que você digitou.
@@ -110,11 +110,30 @@ O card **Setpoint** define a tensão (**V**, de 0 a 30 V) e o limite de corrente
 
 ### Memórias M1–M6
 
-A fonte tem seis grupos de memória, cada um com um par tensão/corrente.
+A fonte tem seis grupos de memória, cada um com um par tensão/corrente. Abaixo do card Setpoint fica o **quadro de setup**, que mostra e edita seis valores, na mesma ordem do visor da fonte:
 
-- **Passe o mouse** sobre M1…M6 para ver os valores salvos.
-- **Clique** num grupo para *carregar* os valores nos campos do setpoint. Nada é enviado ainda: confira os valores e clique em **Aplicar**.
-- **Salvar** grava os valores dos campos no grupo selecionado.
+| Campo | Máximo | Unidade | Vale para |
+|---|---|---|---|
+| **Vset** (tensão da memória) | 36,00 | V | a memória |
+| **Iset** (corrente da memória) | 8,200 | A | a memória |
+| **OVP** (proteção de sobretensão) | 36,10 | V | o aparelho todo\* |
+| **OCP** (proteção de sobrecorrente) | 8,200 | A | o aparelho todo\* |
+| **OPP** (proteção de sobrepotência) | 295,20 | W | o aparelho todo\* |
+| **OTP** (proteção de sobretemperatura) | 99 | °C | o aparelho todo\* |
+
+\* A fonte não guarda OVP, OCP, OPP e OTP por memória: são limites do aparelho. Por isso esses rótulos têm um `*` e o quadro avisa "vale para o aparelho todo".
+
+- **Clique** em M1…M6 para ver os valores da memória no quadro. Nada é enviado à fonte. Sem dado, o campo mostra "—".
+- **Passe o mouse** sobre M1…M6 para ver a tensão e a corrente salvas.
+- Todos os campos são editáveis (arraste ou digite). Alterações ainda não salvas mostram **"• não salvo"** e não são sobrescritas pelos dados que chegam da fonte.
+- Trocar de memória com alteração pendente mostra **"Descartar as alterações de Mn?"**, com **Descartar** e **Continuar editando**.
+- **Desfazer** descarta a edição e volta aos valores da fonte.
+- **Usar no setpoint** carrega a tensão e a corrente da memória no card Setpoint (marcando "não aplicado"). Nada é enviado até você clicar em **Aplicar**.
+- **Salvar** envia os **seis valores** do quadro à fonte, gravando Vset/Iset na memória selecionada e as proteções no aparelho. Fica desabilitado sem conexão e enquanto houver erro.
+- Os valores são conferidos antes de enviar. Um campo acima do máximo, vazio ou que não é número fica em **vermelho**, e a mensagem diz o motivo. Também não é aceito **Vset maior que o OVP** nem **Iset maior que o OCP**. Havendo erro, nada é enviado.
+- Depois de salvar, o programa lê a fonte de volta e mostra **"verificando…"** e depois **"gravado"**. Se a fonte não devolver os valores enviados, mostra **"não confirmado"**.
+
+> **Experimental:** a escrita de OVP, OCP, OPP e OTP ainda não foi confirmada em aparelho real. A mensagem "gravado" só aparece quando a leitura seguinte da fonte confirma.
 
 ### Ligar e desligar a saída
 
@@ -123,7 +142,7 @@ O botão grande no fim da coluna liga e desliga a saída da fonte:
 - **SAÍDA LIGADA** (verde): a saída está ativa. Clique para desligar.
 - **SAÍDA DESLIGADA** (cinza): a saída está desligada. Clique para ligar.
 
-Sem conexão, este botão, o **Aplicar** e o **Salvar** ficam desabilitados.
+Sem conexão, este botão, o **Aplicar**, o **Salvar** e os campos do quadro de setup ficam desabilitados.
 
 ### Gráfico
 
@@ -248,8 +267,8 @@ cargo test --lib
 
 ## Limitações conhecidas
 
-- **Faixa do setpoint**: os campos aceitam no máximo **30 V e 5 A**. A IPS3608 vai até 36 V e 8 A, então a parte de cima da faixa dela ainda não pode ser ajustada pela interface.
-- **Proteções**: os valores de OVP/OCP/OPP/OTP/LVP e o estado de proteção são lidos, mas ainda não aparecem na interface nem podem ser alterados.
+- **Proteções**: OVP, OCP, OPP e OTP aparecem e podem ser alterados no quadro de setup (a escrita é experimental). **LVP** e o estado de proteção são lidos, mas ainda não aparecem na interface.
+- **Faixas fixas**: os máximos da tabela de memórias são os da IPS3608. Em um DPS150, de faixa menor, a fonte pode recusar um valor mais alto; o programa então mostra "não confirmado".
 - **Brilho, volume e medição**: são lidos, mas não aparecem na interface.
 - **Cores do gráfico**: não ficam salvas entre execuções.
 

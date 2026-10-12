@@ -7,6 +7,7 @@
 pub mod app;
 pub mod format;
 pub mod history;
+pub mod memory_setup;
 pub mod protocol;
 pub mod scale;
 pub mod session;

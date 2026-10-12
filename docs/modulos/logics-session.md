@@ -24,7 +24,7 @@ função `notify` que recebe pronta.
 | Item | O que é |
 |---|---|
 | `BAUD_RATE` | A velocidade da serial: 115200 baud |
-| `AppCommand` | O que a interface pede à sessão: `SetVoltage(V)`, `SetCurrent(A)`, `EnableOutput(bool)`, `SaveProfile(n, V, A)`, `SetPollInterval(intervalo)` e `Disconnect` |
+| `AppCommand` | O que a interface pede à sessão: `SetVoltage(V)`, `SetCurrent(A)`, `EnableOutput(bool)`, `SaveMemorySetup(valores)` (as proteções e o Vset/Iset de uma memória), `SetPollInterval(intervalo)` e `Disconnect` |
 | `SerialEvent` | O que a sessão avisa à interface: `Update(DPSUpdate)` (dados novos), `Connected` (a inicialização terminou) e `Error(mensagem)` |
 
 ## Funções
@@ -77,8 +77,8 @@ segundo.
 4. Envia `SerialEvent::Connected` e chama `notify`.
 5. **Laço principal**, repetido até o `Disconnect`:
    - **Comandos**: esvazia o canal de comandos e executa cada um: `SetVoltage`/`SetCurrent` viram um `SET` de
-     número; `EnableOutput` liga/desliga a saída; `SaveProfile(n, V, A)` grava tensão e corrente no grupo de
-     memória `n`; `SetPollInterval` troca o intervalo do passo seguinte; `Disconnect` escreve o bloqueio de
+     número; `EnableOutput` liga/desliga a saída; `SaveMemorySetup(valores)` escreve cada pacote de
+     `memory_setup_packets` com 100 ms entre eles (proteções, Vset/Iset do grupo e uma releitura); `SetPollInterval` troca o intervalo do passo seguinte; `Disconnect` escreve o bloqueio de
      sessão (`lock_session`) e **encerra**.
    - **Leitura**: tenta ler da porta (espera até 50 ms). Os bytes lidos vão para
      `DPS150::push_serial_data`, e cada atualização devolvida vira um `SerialEvent::Update`. Se houve alguma,
@@ -93,7 +93,25 @@ espera até 50 ms, o laço dá uma volta a cada 50 ms no máximo, sem consumir C
 `Error("Falha ao abrir /dev/ttyUSB9: …")`, chama `notify` e retorna; nenhuma inicialização acontece. A
 interface recebe o erro em `poll_events` e mostra a mensagem na barra superior.
 
+### `memory_setup_packets`
+
+*(interna)*
+
+| | |
+|---|---|
+| **Propósito** | Montar os pacotes que gravam o setup de uma memória, na ordem de envio. |
+| **Entradas** | `power_supply`: o protocolo. `v`: os seis valores validados e o grupo. |
+| **Saída** | A lista de pacotes (cada um é um `Vec<u8>`). |
+| **Efeitos** | nenhum (só monta; quem escreve na porta é `session_main`) |
+
+**Como funciona**: monta, nesta ordem: OVP, OCP, OPP e OTP (`set_float_value` com os type_ids 209 a 212), a tensão e a corrente do grupo (`group_voltage_id` e `group_current_id`; grupo sem id não gera esses dois) e, por fim, o `GET ALL`, que faz a interface ler de volta o que a fonte guardou. A escrita das proteções é **experimental**: ainda não foi confirmada em aparelho real.
+
+**Exemplo:** grupo 2, OVP 36,0, OCP 2,5, OPP 295,2, OTP 60,0, Vset 5,0 e Iset 0,5 → sete pacotes: tipos 209, 210, 211, 212, 199, 200 e 255 (leitura).
+
 ## Testes
 
-Este módulo não tem testes automáticos: depende de uma porta serial real. Ele é validado pelo roteiro manual
-de paridade, com a fonte conectada (veja a [especificação da refatoração](../../specs/001-modularize-logics-gui/spec.md#verificação-manual-de-paridade)).
+A montagem dos pacotes de setup tem dois testes (`pacotes_do_setup_seguem_a_ordem_do_contrato` e
+`grupo_sem_type_id_nao_envia_vset_e_iset`). O resto do módulo não tem testes automáticos: depende de uma porta
+serial real. Ele é validado pelo roteiro manual de paridade, com a fonte conectada (veja a
+[especificação da refatoração](../../specs/001-modularize-logics-gui/spec.md#verificação-manual-de-paridade)) e, para o
+setup, pelo roteiro da [feature 003](../../specs/003-memory-setup-fields/quickstart.md).

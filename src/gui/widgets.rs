@@ -1,6 +1,9 @@
 //! Widgets e helpers de layout reaproveitados pelos painéis.
 
+use crate::logics::memory_setup::SetupField;
 use eframe::egui::{self, Color32, Sense, Vec2};
+
+use super::theme::ERROR_COLOR;
 
 /// Leitura grande de uma grandeza (V, A ou W) com selo opcional de modo (CV/CC).
 pub(crate) struct ReadoutRow<'a> {
@@ -79,4 +82,46 @@ pub(crate) fn column_ui(ui: &mut egui::Ui, rect: egui::Rect) -> egui::Ui {
             .max_rect(rect)
             .layout(egui::Layout::top_down(egui::Align::Min)),
     )
+}
+
+/// Campo do quadro de setup: rótulo pequeno em cima e valor editável embaixo.
+///
+/// `accent` dá a cor do rótulo (V, A e W); `invalid` pinta rótulo e valor de vermelho. Devolve o
+/// novo valor quando o usuário o altera. Sem valor (`None`), mostra "—" desabilitado.
+pub(crate) fn setup_field(
+    ui: &mut egui::Ui,
+    field: SetupField,
+    value: Option<f32>,
+    accent: Option<Color32>,
+    enabled: bool,
+    invalid: bool,
+) -> Option<f32> {
+    let star = if field.is_global() { "*" } else { "" };
+    let label = egui::RichText::new(format!("{}{star}", field.label())).small();
+    let label = match (invalid, accent) {
+        (true, _) => label.color(ERROR_COLOR),
+        (false, Some(color)) => label.color(color).strong(),
+        (false, None) => label.weak(),
+    };
+    let mut edited = None;
+    ui.vertical(|ui| {
+        ui.label(label);
+        let Some(mut v) = value else {
+            ui.add_enabled(false, egui::Label::new("\u{2014}"));
+            return;
+        };
+        if invalid {
+            ui.visuals_mut().override_text_color = Some(ERROR_COLOR);
+        }
+        let drag = egui::DragValue::new(&mut v)
+            .range(0.0..=field.max())
+            .clamp_existing_to_range(false)
+            .speed(field.max() * 0.002)
+            .fixed_decimals(field.decimals())
+            .suffix(format!(" {}", field.unit()));
+        if ui.add_enabled(enabled, drag).changed() {
+            edited = Some(v);
+        }
+    });
+    edited
 }
