@@ -65,7 +65,7 @@ O projeto tem dois binários:
 
 | Binário | Arquivo | Descrição |
 |---|---|---|
-| `controller` | [src/controller.rs](src/controller.rs) | Interface gráfica (egui/eframe) |
+| `controller` | [src/controller.rs](src/controller.rs) | Interface gráfica (egui/eframe); o arquivo só contém o `main` |
 | `tests` | [src/tests.rs](src/tests.rs) | Monitor de linha de comando, usado para explorar o protocolo |
 
 O perfil `release` é otimizado para gerar um binário pequeno (`opt-level = "s"`, LTO, `strip`, `panic = "abort"`).
@@ -174,7 +174,7 @@ O monitor abre `/dev/ttyACM0` (o caminho está fixo no código), faz a mesma ini
 
 ## Protocolo
 
-A implementação fica em [src/dps150.rs](src/dps150.rs).
+A implementação fica em [src/logics/protocol.rs](src/logics/protocol.rs).
 
 ### Formato do pacote
 
@@ -237,18 +237,45 @@ Os floats nos offsets 119, 123, 127, 131 e 135 existem no payload, mas o signifi
 
 ## Estrutura do código
 
+O pacote tem uma biblioteca (`src/lib.rs`, crate `dps150`) com dois módulos e dois binários que a usam:
+
+```
+controller.rs ──▶ gui ──▶ logics ◀── tests.rs
+```
+
 | Arquivo | Conteúdo |
 |---|---|
-| [src/dps150.rs](src/dps150.rs) | Protocolo: montagem de comandos, checksum, leitura do fluxo serial (com ressincronização) e conversão em `DPSUpdate` |
-| [src/controller.rs](src/controller.rs) | Interface gráfica: estado da aplicação, layout, gráfico e thread serial |
-| [src/tests.rs](src/tests.rs) | Monitor de linha de comando |
+| [src/controller.rs](src/controller.rs) | Ponto de entrada: `main`, que configura a janela e inicia a `gui` |
+| [src/tests.rs](src/tests.rs) | Monitor de linha de comando (usa só `logics::protocol`) |
+| [src/lib.rs](src/lib.rs) | Declara os módulos `logics` e `gui` |
+| **`logics/`** | **Regras de negócio, protocolo e sessão serial.** Não depende da interface gráfica |
+| [src/logics/protocol.rs](src/logics/protocol.rs) | Protocolo: montagem de comandos, checksum, leitura do fluxo serial (com ressincronização) e conversão em `DPSUpdate` |
+| [src/logics/session.rs](src/logics/session.rs) | Thread da sessão serial, comandos (`AppCommand`), eventos (`SerialEvent`) e lista de portas |
+| [src/logics/app.rs](src/logics/app.rs) | `AppState`: conexão, setpoint e edição pendente, memórias, relógio de saída e junção das atualizações |
+| [src/logics/history.rs](src/logics/history.rs) | Histórico limitado de amostras do gráfico |
+| [src/logics/scale.rs](src/logics/scale.rs) | Cálculo das escalas do gráfico |
+| [src/logics/format.rs](src/logics/format.rs) | Formatação de durações |
+| **`gui/`** | **Apresentação.** Lê o `AppState` e repassa as ações do usuário; não tem regras nem acessa a serial |
+| [src/gui/mod.rs](src/gui/mod.rs) | `GuiApp` (`eframe::App`): ciclo por quadro e layout |
+| [src/gui/panels.rs](src/gui/panels.rs) | Barra superior, coluna de controle (leituras, setpoint, memórias, saída) e barra inferior |
+| [src/gui/chart.rs](src/gui/chart.rs) | Gráfico, legenda com seletor de cor e controles |
+| [src/gui/widgets.rs](src/gui/widgets.rs) | Widgets reaproveitados |
+| [src/gui/theme.rs](src/gui/theme.rs) | Cores e dimensões |
 
 A comunicação serial roda numa thread própria e conversa com a interface por dois canais `mpsc`:
 
 - **Interface → thread** (`AppCommand`): definir tensão e corrente, ligar e desligar a saída, salvar memória, mudar o intervalo de leitura, desconectar.
 - **Thread → interface** (`SerialEvent`): dados recebidos, conexão estabelecida, erro.
 
-A interface junta as atualizações parciais num único estado (`merge_state`) e redesenha a tela pelo menos a cada 100 ms.
+A cada evento novo, a thread pede um redesenho por meio de um closure recebido ao conectar, então `logics` não precisa conhecer a biblioteca de interface. O `AppState` junta as atualizações parciais num único estado, e a interface redesenha pelo menos a cada 100 ms. Sem conexão, a lista de portas é atualizada uma vez por segundo.
+
+### Testes
+
+As regras de `logics` e o protocolo têm testes unitários, que rodam sem interface gráfica e sem a fonte conectada:
+
+```bash
+cargo test --lib
+```
 
 ## Limitações conhecidas
 

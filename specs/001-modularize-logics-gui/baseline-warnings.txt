@@ -1,0 +1,39 @@
+# Referência de avisos antes da refatoração (cargo clippy --all-targets, 2026-10-12)
+# Gerado numa cópia com serialport sem a feature libudev (o ambiente não tem libudev-devel).
+      1 warning: very complex type used. Consider factoring parts into `type` definitions
+      1 warning: use of deprecated module `std::u8`: all constants in this module replaced by associated constants on the type
+      1 warning: method `get_protection` is never used
+      1 warning: importing legacy numeric constants
+      1 warning: `dps150` (bin "tests" test) generated 31 warnings (25 duplicates)
+      1 warning: `dps150` (bin "tests") generated 31 warnings (6 duplicates)
+      1 warning: `dps150` (bin "controller" test) generated 18 warnings (17 duplicates)
+      1 warning: `dps150` (bin "controller") generated 18 warnings (17 duplicates)
+      1 warning: constant `VOLUME` is never used
+      1 warning: constant `VOLTAGE_SET` is never used
+      1 warning: constant `PROTECTION_STATE_DATA` is never used
+      1 warning: constant `OVP` is never used
+      1 warning: constant `OTP` is never used
+      1 warning: constant `OPP` is never used
+      1 warning: constant `OCP` is never used
+      1 warning: constant `METERING_ENABLE` is never used
+      1 warning: constant `LVP` is never used
+      1 warning: constant `GROUP6_VOLTAGE_SET` is never used
+      1 warning: constant `GROUP6_CURRENT_SET` is never used
+      1 warning: constant `GROUP5_VOLTAGE_SET` is never used
+      1 warning: constant `GROUP5_CURRENT_SET` is never used
+      1 warning: constant `GROUP4_VOLTAGE_SET` is never used
+      1 warning: constant `GROUP4_CURRENT_SET` is never used
+      1 warning: constant `GROUP3_VOLTAGE_SET` is never used
+      1 warning: constant `GROUP3_CURRENT_SET` is never used
+      1 warning: constant `GROUP2_VOLTAGE_SET` is never used
+      1 warning: constant `GROUP2_CURRENT_SET` is never used
+      1 warning: constant `GROUP1_VOLTAGE_SET` is never used
+      1 warning: constant `GROUP1_CURRENT_SET` is never used
+      1 warning: constant `CURRENT_SET` is never used
+      1 warning: constant `CMD_XXX_192` is never used
+      1 warning: constant `BRIGHTNESS` is never used
+      1 warning: constant `BAUD_9600` is never used
+      1 warning: constant `BAUD_57600` is never used
+      1 warning: constant `BAUD_38400` is never used
+      1 warning: constant `BAUD_19200` is never used
+      1 warning: associated items `get_protection`, `lock_session`, `group_voltage_id`, `group_current_id`, `enable_output`, and `set_float_value` are never used
