@@ -9,6 +9,8 @@ A linguagem utilizada é **Rust**. Cheguei a escrever o mesmo programa em C++23,
 
 > ``Esse é um projeto experimental.``
 
+📚 **Documentação de arquitetura:** [docs/](docs/README.md): módulos, diagramas e cada função explicada.
+
 ---
 
 ## Sumário
@@ -24,9 +26,9 @@ A linguagem utilizada é **Rust**. Cheguei a escrever o mesmo programa em C++23,
   - [Gráfico](#gráfico)
   - [Barra inferior: capacidade, energia e tempo](#barra-inferior-capacidade-energia-e-tempo)
 - [O que acontece ao conectar e desconectar](#o-que-acontece-ao-conectar-e-desconectar)
-- [Monitor de linha de comando (`tests`)](#monitor-de-linha-de-comando-tests)
 - [Protocolo](#protocolo)
 - [Estrutura do código](#estrutura-do-código)
+- [Documentação de arquitetura](docs/README.md)
 - [Limitações conhecidas](#limitações-conhecidas)
 - [Licença](#licença)
 
@@ -61,12 +63,7 @@ As duas fontes aparecem no sistema como uma porta serial USB (no Linux, normalme
 cargo run --release --bin controller
 ```
 
-O projeto tem dois binários:
-
-| Binário | Arquivo | Descrição |
-|---|---|---|
-| `controller` | [src/controller.rs](src/controller.rs) | Interface gráfica (egui/eframe); o arquivo só contém o `main` |
-| `tests` | [src/tests.rs](src/tests.rs) | Monitor de linha de comando, usado para explorar o protocolo |
+O binário `controller` ([src/controller.rs](src/controller.rs)) é a interface gráfica (egui/eframe); o arquivo só contém o `main`.
 
 O perfil `release` é otimizado para gerar um binário pequeno (`opt-level = "s"`, LTO, `strip`, `panic = "abort"`).
 
@@ -164,14 +161,6 @@ Ao clicar em **Conectar**, uma thread separada abre a porta a 115200 baud e faz 
 
 Ao clicar em **Desconectar**, o programa envia o comando de bloqueio de sessão e fecha a porta. Se a porta não abrir, ou se nenhuma porta estiver disponível, a mensagem de erro aparece na barra superior.
 
-## Monitor de linha de comando (`tests`)
-
-```bash
-cargo run --bin tests
-```
-
-O monitor abre `/dev/ttyACM0` (o caminho está fixo no código), faz a mesma inicialização da interface gráfica e imprime no terminal os dados recebidos a cada 100 ms: modelo, estado de proteção, tensão, corrente, potência, temperatura, versões, setpoints e energia. Ele foi usado para explorar o protocolo e não envia comandos de controle.
-
 ## Protocolo
 
 A implementação fica em [src/logics/protocol.rs](src/logics/protocol.rs).
@@ -237,37 +226,17 @@ Os floats nos offsets 119, 123, 127, 131 e 135 existem no payload, mas o signifi
 
 ## Estrutura do código
 
-O pacote tem uma biblioteca (`src/lib.rs`, crate `dps150`) com dois módulos e dois binários que a usam:
+O pacote tem uma biblioteca (`src/lib.rs`, crate `dps150`) com dois módulos, e o binário `controller` que os usa:
 
 ```
-controller.rs ──▶ gui ──▶ logics ◀── tests.rs
+controller.rs ──▶ gui ──▶ logics
 ```
 
-| Arquivo | Conteúdo |
-|---|---|
-| [src/controller.rs](src/controller.rs) | Ponto de entrada: `main`, que configura a janela e inicia a `gui` |
-| [src/tests.rs](src/tests.rs) | Monitor de linha de comando (usa só `logics::protocol`) |
-| [src/lib.rs](src/lib.rs) | Declara os módulos `logics` e `gui` |
-| **`logics/`** | **Regras de negócio, protocolo e sessão serial.** Não depende da interface gráfica |
-| [src/logics/protocol.rs](src/logics/protocol.rs) | Protocolo: montagem de comandos, checksum, leitura do fluxo serial (com ressincronização) e conversão em `DPSUpdate` |
-| [src/logics/session.rs](src/logics/session.rs) | Thread da sessão serial, comandos (`AppCommand`), eventos (`SerialEvent`) e lista de portas |
-| [src/logics/app.rs](src/logics/app.rs) | `AppState`: conexão, setpoint e edição pendente, memórias, relógio de saída e junção das atualizações |
-| [src/logics/history.rs](src/logics/history.rs) | Histórico limitado de amostras do gráfico |
-| [src/logics/scale.rs](src/logics/scale.rs) | Cálculo das escalas do gráfico |
-| [src/logics/format.rs](src/logics/format.rs) | Formatação de durações |
-| **`gui/`** | **Apresentação.** Lê o `AppState` e repassa as ações do usuário; não tem regras nem acessa a serial |
-| [src/gui/mod.rs](src/gui/mod.rs) | `GuiApp` (`eframe::App`): ciclo por quadro e layout |
-| [src/gui/panels.rs](src/gui/panels.rs) | Barra superior, coluna de controle (leituras, setpoint, memórias, saída) e barra inferior |
-| [src/gui/chart.rs](src/gui/chart.rs) | Gráfico, legenda com seletor de cor e controles |
-| [src/gui/widgets.rs](src/gui/widgets.rs) | Widgets reaproveitados |
-| [src/gui/theme.rs](src/gui/theme.rs) | Cores e dimensões |
+- **`logics/`**: regras de negócio, protocolo da fonte e sessão serial. Não depende da interface gráfica.
+- **`gui/`**: a interface. Lê o estado de `logics` e repassa as ações do usuário; não tem regras nem acessa a serial.
+- **`controller.rs`**: o ponto de entrada, só com o `main`.
 
-A comunicação serial roda numa thread própria e conversa com a interface por dois canais `mpsc`:
-
-- **Interface → thread** (`AppCommand`): definir tensão e corrente, ligar e desligar a saída, salvar memória, mudar o intervalo de leitura, desconectar.
-- **Thread → interface** (`SerialEvent`): dados recebidos, conexão estabelecida, erro.
-
-A cada evento novo, a thread pede um redesenho por meio de um closure recebido ao conectar, então `logics` não precisa conhecer a biblioteca de interface. O `AppState` junta as atualizações parciais num único estado, e a interface redesenha pelo menos a cada 100 ms. Sem conexão, a lista de portas é atualizada uma vez por segundo.
+A descrição de cada módulo, os diagramas e a explicação de cada função estão na [documentação de arquitetura](docs/README.md); comece pela [visão geral](docs/arquitetura.md).
 
 ### Testes
 
@@ -283,7 +252,6 @@ cargo test --lib
 - **Proteções**: os valores de OVP/OCP/OPP/OTP/LVP e o estado de proteção são lidos, mas ainda não aparecem na interface nem podem ser alterados.
 - **Brilho, volume e medição**: são lidos, mas não aparecem na interface.
 - **Cores do gráfico**: não ficam salvas entre execuções.
-- **Monitor `tests`**: a porta `/dev/ttyACM0` está fixa no código.
 
 ## Licença
 
