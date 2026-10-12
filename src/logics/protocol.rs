@@ -53,8 +53,6 @@ pub mod commands {
     pub const BAUD_115200: u8 = 5;
     pub const ALL: u8 = 255;
 }
-use std::u8;
-
 use commands::*;
 
 #[derive(Debug, Default)]
@@ -103,6 +101,12 @@ const CC_CV_LABELS: [&str; 2] = ["CC", "CV"];
 
 pub struct DPS150 {
     buffer: Vec<u8>,
+}
+
+impl Default for DPS150 {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DPS150 {
@@ -323,5 +327,80 @@ impl DPS150 {
     fn read_float(&self, payload: &[u8], offset: usize) -> Option<f32> {
         let bytes: [u8; 4] = payload.get(offset..offset + 4)?.try_into().ok()?;
         Some(f32::from_le_bytes(bytes))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Monta um pacote de resposta da fonte: [0xF0, 0xA1, type_id, len, payload…, checksum].
+    fn response(type_id: u8, payload: &[u8]) -> Vec<u8> {
+        let mut packet = vec![HEADER_INPUT, CMD_GET, type_id, payload.len() as u8];
+        packet.extend_from_slice(payload);
+        let sum =
+            type_id as u32 + payload.len() as u32 + payload.iter().map(|&b| b as u32).sum::<u32>();
+        packet.push((sum % CHECKSUM_MODULUS) as u8);
+        packet
+    }
+
+    fn output_packet(v: f32, i: f32, p: f32) -> Vec<u8> {
+        let payload: Vec<u8> = [v, i, p].iter().flat_map(|x| x.to_le_bytes()).collect();
+        response(195, &payload)
+    }
+
+    #[test]
+    fn comando_enable_output() {
+        assert_eq!(
+            DPS150::new().enable_output(true),
+            vec![0xF1, 0xB1, 219, 1, 1, 221]
+        );
+    }
+
+    #[test]
+    fn comando_set_float() {
+        let cmd = DPS150::new().set_float_value(VOLTAGE_SET, 5.0);
+        let bytes = 5.0f32.to_le_bytes();
+        assert_eq!(&cmd[..4], &[0xF1, 0xB1, VOLTAGE_SET, 4]);
+        assert_eq!(&cmd[4..8], &bytes);
+        let sum = VOLTAGE_SET as u32 + 4 + bytes.iter().map(|&b| b as u32).sum::<u32>();
+        assert_eq!(cmd[8], (sum % 256) as u8);
+    }
+
+    #[test]
+    fn interpreta_tensao_corrente_e_potencia() {
+        let updates = DPS150::new().push_serial_data(&output_packet(5.0, 0.25, 1.25));
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].output_voltage, Some(5.0));
+        assert_eq!(updates[0].output_current, Some(0.25));
+        assert_eq!(updates[0].output_power, Some(1.25));
+    }
+
+    #[test]
+    fn ignora_lixo_antes_do_cabecalho() {
+        let mut data = vec![0x00, 0x13, 0x37];
+        data.extend(output_packet(3.3, 0.1, 0.33));
+        let updates = DPS150::new().push_serial_data(&data);
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].output_voltage, Some(3.3));
+    }
+
+    #[test]
+    fn pacote_fragmentado() {
+        let packet = output_packet(12.0, 1.0, 12.0);
+        let (first, rest) = packet.split_at(7);
+        let mut dps = DPS150::new();
+        assert!(dps.push_serial_data(first).is_empty());
+        let updates = dps.push_serial_data(rest);
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].output_voltage, Some(12.0));
+    }
+
+    #[test]
+    fn checksum_invalido_e_descartado() {
+        let mut packet = output_packet(5.0, 0.25, 1.25);
+        let last = packet.len() - 1;
+        packet[last] = packet[last].wrapping_add(1);
+        assert!(DPS150::new().push_serial_data(&packet).is_empty());
     }
 }

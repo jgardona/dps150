@@ -1,2 +1,10 @@
 /target
 /Cargo.lock
+
+# Rust
+*.rs.bk
+*.log
+.env*
+.idea/
+.claude
+.specify
