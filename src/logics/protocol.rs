@@ -349,6 +349,53 @@ mod tests {
         response(195, &payload)
     }
 
+    /// Pacote esperado de SET com um float: [0xF1, 0xB1, type_id, 4, f32 LE…, checksum].
+    fn set_float_packet(type_id: u8, value: f32) -> Vec<u8> {
+        let bytes = value.to_le_bytes();
+        let sum = type_id as u32 + 4 + bytes.iter().map(|&b| b as u32).sum::<u32>();
+        let mut packet = vec![HEADER_OUTPUT, CMD_SET, type_id, 4];
+        packet.extend_from_slice(&bytes);
+        packet.push((sum % CHECKSUM_MODULUS) as u8);
+        packet
+    }
+
+    #[test]
+    fn comandos_de_protecao_usam_os_type_ids_209_a_212() {
+        let ps = DPS150::new();
+        for (id, tipo, valor) in [
+            (OVP, 209, 36.0f32),
+            (OCP, 210, 2.5),
+            (OPP, 211, 295.2),
+            (OTP, 212, 60.0),
+        ] {
+            assert_eq!(id, tipo);
+            assert_eq!(ps.set_float_value(id, valor), set_float_packet(tipo, valor));
+        }
+        // Fixture escrita à mão: OVP = 36.0 → 0x42100000 → bytes 00 00 10 42.
+        assert_eq!(
+            ps.set_float_value(OVP, 36.0),
+            vec![0xF1, 0xB1, 209, 4, 0x00, 0x00, 0x10, 0x42, 0x27]
+        );
+    }
+
+    #[test]
+    fn comandos_do_grupo_2_usam_199_e_200() {
+        let ps = DPS150::new();
+        let v = DPS150::group_voltage_id(2).unwrap();
+        let c = DPS150::group_current_id(2).unwrap();
+        assert_eq!((v, c), (199, 200));
+        assert_eq!(ps.set_float_value(v, 5.0), set_float_packet(199, 5.0));
+        assert_eq!(ps.set_float_value(c, 0.5), set_float_packet(200, 0.5));
+    }
+
+    #[test]
+    fn grupo_fora_de_1_a_6_nao_tem_type_id() {
+        assert_eq!(DPS150::group_voltage_id(0), None);
+        assert_eq!(DPS150::group_voltage_id(7), None);
+        assert_eq!(DPS150::group_current_id(0), None);
+        assert_eq!(DPS150::group_current_id(7), None);
+    }
+
     #[test]
     fn comando_enable_output() {
         assert_eq!(
