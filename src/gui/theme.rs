@@ -6,6 +6,8 @@ use eframe::egui::Color32;
 pub(crate) const CONTROL_SHARE: f32 = 0.36;
 pub(crate) const CONTROL_MIN_WIDTH: f32 = 330.0;
 pub(crate) const CONTROL_MAX_WIDTH: f32 = 440.0;
+/// Tamanho do texto do quadro de setup das memórias (título, rótulos, valores e unidades).
+pub(crate) const SETUP_FONT_SIZE: f32 = 16.0;
 /// Largura do seletor de cor da legenda.
 pub(crate) const COLOR_PICKER_WIDTH: f32 = 200.0;
 /// Largura reservada para cada uma das três escalas à esquerda do gráfico.
