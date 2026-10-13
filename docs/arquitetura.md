@@ -38,6 +38,7 @@ nele.
 | [`gui/mod.rs`](../src/gui/mod.rs) | `GuiApp`: o ciclo de cada quadro e o layout em colunas (controle à esquerda, gráfico à direita) | Regra de negócio |
 | [`gui/panels.rs`](../src/gui/panels.rs) | Barra superior (conexão), coluna de controle (leituras, setpoint, memórias, saída) e barra inferior (acumuladores) | Calcular regras: cada ação do usuário chama um método de `AppState` |
 | [`gui/chart.rs`](../src/gui/chart.rs) | Painel do gráfico: legenda com seletor de cor, desenho das três séries e das escalas, slider de intervalo e botão "Limpar" | Calcular escalas (usa `logics::scale`), guardar o histórico |
+| [`gui/fonts.rs`](../src/gui/fonts.rs) | A fonte Noto Sans, embutida no executável (de `assets/fonts/`), e a instalação dela como fonte padrão | Escolher tamanhos ou cores de texto |
 | [`gui/widgets.rs`](../src/gui/widgets.rs) | Pequenos componentes reaproveitados pelos painéis (leitura grande, moldura, ponto de status…) | Ler ou alterar o estado da aplicação |
 | [`gui/theme.rs`](../src/gui/theme.rs) | Constantes de cores e dimensões da interface (não tem funções) | Lógica |
 
@@ -47,7 +48,7 @@ Cada módulo com funções tem um documento próprio, que explica cada função 
 efeitos e como funciona):
 [`controller`](modulos/controller.md) ·
 [`gui`](modulos/gui-mod.md) · [`gui::panels`](modulos/gui-panels.md) · [`gui::chart`](modulos/gui-chart.md) ·
-[`gui::widgets`](modulos/gui-widgets.md) ·
+[`gui::widgets`](modulos/gui-widgets.md) · [`gui::fonts`](modulos/gui-fonts.md) ·
 [`logics::app`](modulos/logics-app.md) · [`logics::protocol`](modulos/logics-protocol.md) ·
 [`logics::session`](modulos/logics-session.md) · [`logics::history`](modulos/logics-history.md) ·
 [`logics::memory_setup`](modulos/logics-memory_setup.md) · [`logics::scale`](modulos/logics-scale.md) ·
@@ -67,6 +68,7 @@ flowchart LR
     PANELS["panels"]
     CHART["chart"]
     WIDGETS["widgets"]
+    FONTS["fonts"]
     THEME["theme"]
   end
   subgraph L["logics"]
@@ -81,6 +83,7 @@ flowchart LR
   CTRL --> GMOD
   GMOD --> PANELS
   GMOD --> CHART
+  GMOD --> FONTS
   PANELS --> WIDGETS
   CHART --> WIDGETS
   PANELS --> THEME

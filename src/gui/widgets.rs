@@ -3,7 +3,7 @@
 use crate::logics::memory_setup::SetupField;
 use eframe::egui::{self, Color32, Sense, Vec2};
 
-use super::theme::ERROR_COLOR;
+use super::theme::{ERROR_COLOR, SETUP_FONT_SIZE};
 
 /// Leitura grande de uma grandeza (V, A ou W) com selo opcional de modo (CV/CC).
 pub(crate) struct ReadoutRow<'a> {
@@ -84,7 +84,7 @@ pub(crate) fn column_ui(ui: &mut egui::Ui, rect: egui::Rect) -> egui::Ui {
     )
 }
 
-/// Campo do quadro de setup: rótulo pequeno em cima e valor editável embaixo.
+/// Campo do quadro de setup: rótulo em cima e valor editável embaixo.
 ///
 /// `accent` dá a cor do rótulo (V, A e W); `invalid` pinta rótulo e valor de vermelho. Devolve o
 /// novo valor quando o usuário o altera. Sem valor (`None`), mostra "—" desabilitado.
@@ -97,7 +97,7 @@ pub(crate) fn setup_field(
     invalid: bool,
 ) -> Option<f32> {
     let star = if field.is_global() { "*" } else { "" };
-    let label = egui::RichText::new(format!("{}{star}", field.label())).small();
+    let label = egui::RichText::new(format!("{}{star}", field.label())).size(SETUP_FONT_SIZE);
     let label = match (invalid, accent) {
         (true, _) => label.color(ERROR_COLOR),
         (false, Some(color)) => label.color(color).strong(),
@@ -105,14 +105,22 @@ pub(crate) fn setup_field(
     };
     let mut edited = None;
     ui.vertical(|ui| {
-        ui.label(label);
+        // Sem quebra de linha: numa coluna estreita (valor "—"), o rótulo com `*` quebraria e o
+        // asterisco cairia para a linha de baixo.
+        ui.add(egui::Label::new(label).extend());
         let Some(mut v) = value else {
-            ui.add_enabled(false, egui::Label::new("\u{2014}"));
+            ui.add_enabled(
+                false,
+                egui::Label::new(egui::RichText::new("\u{2014}").size(SETUP_FONT_SIZE)),
+            );
             return;
         };
         if invalid {
             ui.visuals_mut().override_text_color = Some(ERROR_COLOR);
         }
+        // O DragValue não tem `.size()`: o tamanho vem do estilo desta sub-área, que não vaza para
+        // o resto da interface.
+        ui.style_mut().override_font_id = Some(egui::FontId::proportional(SETUP_FONT_SIZE));
         let drag = egui::DragValue::new(&mut v)
             .range(0.0..=field.max())
             .clamp_existing_to_range(false)

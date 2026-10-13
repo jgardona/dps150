@@ -6,7 +6,7 @@ Arquivo: [`src/gui/mod.rs`](../../src/gui/mod.rs) · Visão geral: [arquitetura]
 
 Raiz do módulo `gui`. Define o `GuiApp`, a aplicação gráfica que o egui executa, e coordena **cada quadro**:
 atualiza o estado, divide a janela em colunas e chama os painéis. Também declara os submódulos `panels`,
-`chart`, `widgets` e `theme`.
+`chart`, `widgets`, `fonts` e `theme`, e reexporta `install_fonts`, de [`fonts`](gui-fonts.md).
 
 ## O que não faz
 
@@ -27,6 +27,7 @@ O módulo [`gui/theme.rs`](../../src/gui/theme.rs) não tem funções; só const
 |---|---|---|
 | `CONTROL_SHARE` | 0,36 | Fração da largura da janela para a coluna de controle |
 | `CONTROL_MIN_WIDTH` / `CONTROL_MAX_WIDTH` | 330 / 440 px | Limites da largura da coluna de controle |
+| `SETUP_FONT_SIZE` | 16 px | Tamanho do texto do quadro de setup das memórias (título, rótulos, valores e unidades) |
 | `COLOR_PICKER_WIDTH` | 200 px | Largura do seletor de cor da legenda |
 | `CHART_AXIS_COL_W` | 40 px | Largura de cada uma das três colunas de escala do gráfico |
 | `DEFAULT_SERIES_COLORS` | vermelho, verde, azul | Cores iniciais de V, A e W |

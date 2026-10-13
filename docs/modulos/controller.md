@@ -31,6 +31,7 @@ que ele acessa pela biblioteca `dps150`.
 | **Efeitos** | Abre a janela do programa e roda o laço da interface até ela ser fechada. |
 
 **Como funciona**: monta as opções da janela (`NativeOptions`) com o tamanho inicial de `WIDTH × HEIGHT` e chama
-`eframe::run_native` com o título "DPS150 Controller" e uma função que cria o `GuiApp::new()`. A partir daí,
+`eframe::run_native` com o título "DPS150 Controller" e uma função que, antes de criar o `GuiApp::new()`, instala a fonte Noto Sans (`install_fonts`, de
+[`gui::fonts`](gui-fonts.md)). A partir daí,
 o egui chama `GuiApp::ui` a cada quadro. O retorno do `main` é o retorno de `run_native`, então um erro de
 inicialização do egui aparece como erro do programa.

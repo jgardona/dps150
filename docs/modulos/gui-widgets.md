@@ -89,9 +89,9 @@ coluna de controle e outra para o gráfico.
 
 | | |
 |---|---|
-| **Propósito** | Desenhar um campo do quadro de setup: rótulo pequeno em cima e valor editável embaixo. |
+| **Propósito** | Desenhar um campo do quadro de setup: rótulo em cima e valor editável embaixo, ambos com 16 px. |
 | **Entradas** | `ui`: a área. `field`: o campo. `value`: o valor atual (`None` se a fonte não informou). `accent`: a cor do rótulo (V, A e W). `enabled`: se aceita edição. `invalid`: se está com erro. |
 | **Saída** | `Some(novo valor)` quando o usuário altera o campo; `None` caso contrário. |
 | **Efeitos** | nenhum além de desenhar; quem grava o valor é quem chama |
 
-**Como funciona**: empilha o rótulo (com `*` quando o campo vale para o aparelho todo) e o valor. O rótulo usa `accent`; se `invalid`, rótulo e valor ficam vermelhos. Sem valor, mostra "—" desabilitado. Com valor, usa um `DragValue` com faixa de 0 até o máximo do campo, **sem cortar** o que o usuário digita (`clamp_existing_to_range(false)`): assim um valor acima do máximo continua visível e a validação o marca em vermelho, em vez de ser trocado em silêncio. As casas decimais e a unidade são as do campo.
+**Como funciona**: empilha o rótulo (com `*` quando o campo vale para o aparelho todo) e o valor, com `SETUP_FONT_SIZE` (16 px) nos dois. O `DragValue` não tem `.size()`, então o tamanho vem de `override_font_id` no estilo da sub-área do campo, o que não vaza para o resto da interface. O rótulo não quebra de linha (`extend`): numa coluna estreita, como a de um valor "—", o `*` de "OCP*" cairia para a linha de baixo. O rótulo usa `accent`; se `invalid`, rótulo e valor ficam vermelhos. Sem valor, mostra "—" desabilitado. Com valor, usa um `DragValue` com faixa de 0 até o máximo do campo, **sem cortar** o que o usuário digita (`clamp_existing_to_range(false)`): assim um valor acima do máximo continua visível e a validação o marca em vermelho, em vez de ser trocado em silêncio. As casas decimais e a unidade são as do campo.

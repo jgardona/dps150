@@ -105,7 +105,7 @@ aparece na leitura de tensão se a fonte está em `CV` e na de corrente se está
 
 **Como funciona**:
 
-1. **Título** "Setup Mn" com "• não salvo" quando há edição pendente.
+1. **Título** "Setup Mn" em 16 px (`SETUP_FONT_SIZE`), com "• não salvo" quando há edição pendente.
 2. **Grade** de três colunas com `setup_field` para cada campo, na ordem do visor. As cores são a de V (Vset e
    OVP), a de A (Iset e OCP) e a de W (OPP); OTP não tem cor. As edições são anotadas durante o desenho e
    aplicadas só no fim (`set_setup_field`), porque o quadro lê o estado enquanto desenha.

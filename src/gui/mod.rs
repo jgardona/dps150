@@ -4,9 +4,12 @@
 //! Ele não contém regras de negócio nem acessa a porta serial.
 
 mod chart;
+mod fonts;
 mod panels;
 mod theme;
 mod widgets;
+
+pub use fonts::install_fonts;
 
 use crate::logics::app::AppState;
 use eframe::egui::{self, Color32, Pos2, Vec2};

@@ -1,7 +1,7 @@
 //! Barra superior, coluna de controle e barra inferior.
 
 use super::{
-    theme::{ACTION_COLOR, ERROR_COLOR, OK_COLOR, WARN_COLOR},
+    theme::{ACTION_COLOR, ERROR_COLOR, OK_COLOR, SETUP_FONT_SIZE, WARN_COLOR},
     widgets::{ReadoutRow, card, info_pair, setup_field, status_dot},
 };
 use crate::logics::{
@@ -242,7 +242,11 @@ fn setup_card(ui: &mut egui::Ui, app: &mut AppState, colors: &[Color32; 3]) {
 
     card(ui, |ui| {
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(format!("Setup M{memory}")).strong());
+            ui.label(
+                egui::RichText::new(format!("Setup M{memory}"))
+                    .size(SETUP_FONT_SIZE)
+                    .strong(),
+            );
             if dirty {
                 ui.colored_label(WARN_COLOR, "\u{2022} não salvo");
             }

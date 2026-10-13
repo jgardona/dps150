@@ -23,6 +23,7 @@ explicadas (propósito, entradas, saída, efeitos e como funcionam).
 | [gui-mod.md](modulos/gui-mod.md) | `src/gui/mod.rs` | `GuiApp`, o ciclo de cada quadro e o layout em colunas (inclui as constantes de `theme`) |
 | [gui-panels.md](modulos/gui-panels.md) | `src/gui/panels.rs` | Barra superior, coluna de controle e barra inferior |
 | [gui-chart.md](modulos/gui-chart.md) | `src/gui/chart.rs` | Painel do gráfico: legenda, seletor de cor, séries e escalas |
+| [gui-fonts.md](modulos/gui-fonts.md) | `src/gui/fonts.rs` | A fonte Noto Sans, embutida no executável, e a instalação dela |
 | [gui-widgets.md](modulos/gui-widgets.md) | `src/gui/widgets.rs` | Componentes reaproveitados pelos painéis |
 | [logics-app.md](modulos/logics-app.md) | `src/logics/app.rs` | `AppState`: estado e regras da aplicação |
 | [logics-protocol.md](modulos/logics-protocol.md) | `src/logics/protocol.rs` | Protocolo da fonte: comandos, checksum e leitura do fluxo serial |

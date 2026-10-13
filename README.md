@@ -28,6 +28,7 @@ A linguagem utilizada é **Rust**. Cheguei a escrever o mesmo programa em C++23,
 - [O que acontece ao conectar e desconectar](#o-que-acontece-ao-conectar-e-desconectar)
 - [Protocolo](#protocolo)
 - [Estrutura do código](#estrutura-do-código)
+- [Fonte e licença](#fonte-e-licença)
 - [Documentação de arquitetura](docs/README.md)
 - [Limitações conhecidas](#limitações-conhecidas)
 - [Licença](#licença)
@@ -69,7 +70,7 @@ O perfil `release` é otimizado para gerar um binário pequeno (`opt-level = "s"
 
 ## Usando o controlador
 
-A janela tem quatro regiões: a **barra superior** (conexão e informações do aparelho), a **coluna de controle** à esquerda, o **gráfico** à direita e a **barra inferior** (acumuladores). Ao maximizar a janela, o espaço extra vai para o gráfico.
+A janela tem quatro regiões: a **barra superior** (conexão e informações do aparelho), a **coluna de controle** à esquerda, o **gráfico** à direita e a **barra inferior** (acumuladores). Ao maximizar a janela, o espaço extra vai para o gráfico. Todos os textos usam a fonte **Noto Sans**, que vem dentro do programa (veja [Fonte e licença](#fonte-e-licença)).
 
 ### Barra superior: conexão e informações do aparelho
 
@@ -122,6 +123,8 @@ A fonte tem seis grupos de memória, cada um com um par tensão/corrente. Abaixo
 | **OTP** (proteção de sobretemperatura) | 99 | °C | o aparelho todo\* |
 
 \* A fonte não guarda OVP, OCP, OPP e OTP por memória: são limites do aparelho. Por isso esses rótulos têm um `*` e o quadro avisa "vale para o aparelho todo".
+
+O texto do quadro (título, rótulos, valores e unidades) tem **16 px**, maior que o resto da interface, para ser lido sem se aproximar da tela.
 
 - **Clique** em M1…M6 para ver os valores da memória no quadro. Nada é enviado à fonte. Sem dado, o campo mostra "—".
 - **Passe o mouse** sobre M1…M6 para ver a tensão e a corrente salvas.
@@ -254,6 +257,7 @@ controller.rs ──▶ gui ──▶ logics
 - **`logics/`**: regras de negócio, protocolo da fonte e sessão serial. Não depende da interface gráfica.
 - **`gui/`**: a interface. Lê o estado de `logics` e repassa as ações do usuário; não tem regras nem acessa a serial.
 - **`controller.rs`**: o ponto de entrada, só com o `main`.
+- **`assets/`**: arquivos que vão dentro do executável. Hoje, só a fonte Noto Sans e a licença dela (`assets/fonts/`).
 
 A descrição de cada módulo, os diagramas e a explicação de cada função estão na [documentação de arquitetura](docs/README.md); comece pela [visão geral](docs/arquitetura.md).
 
@@ -264,6 +268,12 @@ As regras de `logics` e o protocolo têm testes unitários, que rodam sem interf
 ```bash
 cargo test --lib
 ```
+
+## Fonte e licença
+
+A interface usa a fonte **Noto Sans** (versão 2.015, do projeto [notofonts/latin-greek-cyrillic](https://github.com/notofonts/latin-greek-cyrillic)), distribuída sob a **SIL Open Font License 1.1**. O arquivo da fonte e o texto da licença ficam no repositório, em [`assets/fonts/`](assets/fonts/): [`NotoSans-VariableFont_wght.ttf`](assets/fonts/NotoSans-VariableFont_wght.ttf) e [`OFL.txt`](assets/fonts/OFL.txt).
+
+A fonte é **embutida no executável** na compilação. Por isso o programa aparece igual em qualquer máquina, sem instalar fonte nenhuma, e o binário `release` pode ser copiado sozinho para outra pasta ou computador. O executável fica cerca de 0,7 MB maior por causa dela.
 
 ## Limitações conhecidas
 
