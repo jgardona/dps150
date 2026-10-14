@@ -146,6 +146,8 @@ O botão grande no fim da coluna liga e desliga a saída da fonte:
 - **SAÍDA LIGADA** (verde): a saída está ativa. Clique para desligar.
 - **SAÍDA DESLIGADA** (cinza): a saída está desligada. Clique para ligar.
 
+O botão tem cantos arredondados (raio de 5 px) nos dois estados e fica a 10 px da barra inferior, sem encostar nela.
+
 Sem conexão, este botão, o **Aplicar**, o **Salvar** e os campos do quadro de setup ficam desabilitados.
 
 ### Gráfico

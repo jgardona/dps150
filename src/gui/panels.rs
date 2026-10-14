@@ -1,7 +1,10 @@
 //! Barra superior, coluna de controle e barra inferior.
 
 use super::{
-    theme::{ACTION_COLOR, ERROR_COLOR, FIELD_GAP, OK_COLOR, SETUP_FONT_SIZE, WARN_COLOR},
+    theme::{
+        ACTION_COLOR, ERROR_COLOR, FIELD_GAP, OK_COLOR, OUTPUT_BOTTOM_MARGIN, OUTPUT_BUTTON_RADIUS,
+        SETUP_FONT_SIZE, WARN_COLOR,
+    },
     widgets::{ReadoutRow, card, info_pair, setup_field, status_dot},
 };
 use crate::logics::{
@@ -395,7 +398,11 @@ fn setup_card(ui: &mut egui::Ui, app: &mut AppState, colors: &[Color32; 3]) {
     }
 }
 
-fn output_button(ui: &mut egui::Ui, app: &mut AppState) {
+fn output_button(ui: &mut egui::Ui, app: &mut AppState) -> egui::Response {
+    // A função é chamada num layout de baixo para cima, em que o primeiro item fica na base da área:
+    // um espaço antes do botão o sobe. O egui não acrescenta o espaçamento entre itens depois de um
+    // espaço, então a folga é exatamente a pedida (conferido pelo teste da folga de baixo).
+    ui.add_space(OUTPUT_BOTTOM_MARGIN);
     let (label, fill, text_color, hover) = if app.output_on() {
         (
             "SAÍDA LIGADA",
@@ -417,14 +424,19 @@ fn output_button(ui: &mut egui::Ui, app: &mut AppState) {
             .strong()
             .size(20.0),
     )
-    .fill(fill);
+    .fill(fill)
+    // O raio vai no próprio botão (e não no estilo global): só este botão muda, e vale em todos os
+    // estados, porque o egui o repassa ao quadro que desenha o botão.
+    .corner_radius(OUTPUT_BUTTON_RADIUS);
     let w = ui.available_width();
     let resp = ui
         .add_enabled_ui(app.is_connected(), |ui| ui.add_sized([w, 56.0], button))
         .inner;
-    if resp.on_hover_text(hover).clicked() {
+    let resp = resp.on_hover_text(hover);
+    if resp.clicked() {
         app.toggle_output();
     }
+    resp
 }
 
 pub(crate) fn bottom_bar(ui: &mut egui::Ui, app: &AppState, now: Instant) {
@@ -595,5 +607,65 @@ mod tests {
             (common - mais_largo).abs() < 0.01,
             "{common} != {mais_largo}"
         );
+    }
+
+    /// Retângulos desenhados (em qualquer nível de aninhamento) com a largura mínima dada.
+    fn wide_rects(shape: &egui::epaint::Shape, min_width: f32, out: &mut Vec<egui::CornerRadius>) {
+        match shape {
+            egui::epaint::Shape::Rect(r) if r.rect.width() > min_width => out.push(r.corner_radius),
+            egui::epaint::Shape::Vec(shapes) => {
+                for s in shapes {
+                    wide_rects(s, min_width, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Roda `output_button` desconectado (botão desabilitado) num layout de baixo para cima e devolve
+    /// os raios dos retângulos largos desenhados, a resposta do botão e a base da área.
+    fn output_button_run() -> (Vec<egui::CornerRadius>, Option<egui::Rect>, f32) {
+        let ctx = egui::Context::default();
+        crate::gui::install_fonts(&ctx);
+        let mut app = AppState::new();
+        let (mut radii, mut rect, mut bottom) = (Vec::new(), None, 0.0);
+        for _ in 0..2 {
+            let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                bottom = ui.max_rect().bottom();
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+                    rect = Some(output_button(ui, &mut app).rect);
+                });
+            });
+            radii.clear();
+            for clipped in &out.shapes {
+                wide_rects(&clipped.shape, 100.0, &mut radii);
+            }
+        }
+        (radii, rect, bottom)
+    }
+
+    #[test]
+    fn botao_de_saida_tem_cantos_com_raio_de_5() {
+        let (radii, _, _) = output_button_run();
+        let esperado = egui::CornerRadius::same(OUTPUT_BUTTON_RADIUS);
+        assert!(radii.contains(&esperado), "raios desenhados: {radii:?}");
+    }
+
+    #[test]
+    fn botao_de_saida_tem_folga_de_10_px_embaixo_e_tamanho_de_sempre() {
+        let (_, rect, bottom) = output_button_run();
+        let rect = rect.expect("botão desenhado");
+        let folga = bottom - rect.bottom();
+        assert!(
+            (folga - OUTPUT_BOTTOM_MARGIN).abs() < 0.5,
+            "folga {folga} != {OUTPUT_BOTTOM_MARGIN}"
+        );
+        // A altura (56 px) e a largura (toda a área) não mudam.
+        assert!(
+            (rect.height() - 56.0).abs() < 0.5,
+            "altura {}",
+            rect.height()
+        );
+        assert!(rect.width() > 100.0);
     }
 }

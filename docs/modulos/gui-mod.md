@@ -27,6 +27,8 @@ O módulo [`gui/theme.rs`](../../src/gui/theme.rs) não tem funções; só const
 |---|---|---|
 | `CONTROL_SHARE` | 0,36 | Fração da largura da janela para a coluna de controle |
 | `CONTROL_MIN_WIDTH` / `CONTROL_MAX_WIDTH` | 330 / 440 px | Limites da largura da coluna de controle |
+| `OUTPUT_BUTTON_RADIUS` | 5 px | Raio dos cantos do botão de saída |
+| `OUTPUT_BOTTOM_MARGIN` | 10 px | Folga entre o fundo do botão de saída e a barra inferior |
 | `FIELD_GAP` | 10 px | Espaço extra entre os grupos da linha de campos do Setpoint (campo V e rótulo A; campo A e botão Aplicar), somado ao espaçamento padrão entre widgets |
 | `SETUP_FONT_SIZE` | 16 px | Tamanho do texto do quadro de setup das memórias (título, rótulos, valores e unidades) |
 | `COLOR_PICKER_WIDTH` | 200 px | Largura do seletor de cor da legenda |

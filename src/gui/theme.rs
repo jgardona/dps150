@@ -6,6 +6,10 @@ use eframe::egui::Color32;
 pub(crate) const CONTROL_SHARE: f32 = 0.36;
 pub(crate) const CONTROL_MIN_WIDTH: f32 = 330.0;
 pub(crate) const CONTROL_MAX_WIDTH: f32 = 440.0;
+/// Raio dos cantos do botão de saída, em pixels lógicos.
+pub(crate) const OUTPUT_BUTTON_RADIUS: u8 = 5;
+/// Folga entre a borda de baixo do botão de saída e a barra inferior.
+pub(crate) const OUTPUT_BOTTOM_MARGIN: f32 = 10.0;
 /// Espaço extra entre os grupos da linha de campos do Setpoint: entre o campo V e o rótulo A, e
 /// entre o campo A e o botão Aplicar. Soma-se ao espaçamento padrão entre widgets (de cada lado).
 pub(crate) const FIELD_GAP: f32 = 10.0;

@@ -49,7 +49,7 @@ vem sempre dele. As cores das grandezas chegam por parâmetro (`colors`), na ord
 
 **Como funciona**: desenha as leituras (`readouts`), um espaço de 8 px, o card de setpoint
 (`setpoint_card`), outro espaço de 8 px e o quadro de setup da memória (`setup_card`). Em seguida, num trecho que cresce **de baixo para cima**, desenha o botão de saída
-(`output_button`), que fica assim encostado no fim da coluna.
+(`output_button`), que fica a 10 px do fim da coluna, onde começa a barra inferior.
 
 ### `readouts`
 
@@ -190,12 +190,22 @@ para o **Desfazer** se acertar sem depender de um evento do usuário.
 |---|---|
 | **Propósito** | Desenhar o botão grande que liga e desliga a saída. |
 | **Entradas** | `ui`: a área. `app`: o estado. |
-| **Saída** | nada |
+| **Saída** | A `Response` do botão (quem chama pode ignorá-la). |
 | **Efeitos** | Ao clicar, liga ou desliga a saída da fonte. |
 
 **Como funciona**: o texto e a cor dizem o **estado** atual: "SAÍDA LIGADA" (verde) quando `app.output_on()`,
 "SAÍDA DESLIGADA" (cinza) quando não; a dica diz o que o clique fará. O botão ocupa a largura toda, com 56 px
 de altura, e só é habilitado quando conectado. Clicar chama `app.toggle_output()`.
+
+**Estilo**: os quatro cantos têm raio `OUTPUT_BUTTON_RADIUS` (5 px) em todos os estados (desabilitado, desligada,
+ligada, mouse por cima e pressionado), porque o raio vai no próprio botão (`Button::corner_radius`) e o egui o
+repassa ao quadro que o desenha. Antes de criar o botão, a função acrescenta um espaço de `OUTPUT_BOTTOM_MARGIN`
+(10 px): ela é chamada num layout de baixo para cima, em que o primeiro item fica na base da área, então o espaço
+sobe o botão e deixa 10 px livres entre ele e a barra inferior. O egui não acrescenta o espaçamento entre itens
+depois desse espaço, e o teste da folga confirma os 10 px.
+
+**Exemplo:** a área termina em y = 600. O espaço de 10 px ocupa de 590 a 600, e o botão, com 56 px de altura, ocupa de
+534 a 590, com os cantos arredondados em 5 px.
 
 ### `bottom_bar`
 
@@ -212,7 +222,7 @@ formatado por `format_hhmmss`.
 
 ## Testes
 
-Sete testes, sem janela, medem o texto em Noto Sans no corpo padrão da interface:
+Nove testes, sem janela. Sete medem o texto em Noto Sans no corpo padrão da interface:
 
 - a linha V + A + **Aplicar**, com os valores máximos (36,00 V e 8,200 A), cabe na largura mínima da coluna de
   controle (330 px), contando o preenchimento, o espaçamento entre widgets, o `FIELD_GAP` e as margens do card;
@@ -222,3 +232,9 @@ Sete testes, sem janela, medem o texto em Noto Sans no corpo padrão da interfac
 - se o **Aplicar** estiver mais à esquerda que o fim do aviso, o **Desfazer** vem logo depois do aviso;
 - a largura do **Desfazer** é a largura comum dos dois botões, e essa largura é a do texto mais largo ("Desfazer") mais o
   preenchimento. O **Aplicar** usa o mesmo valor, e a linha V + A + **Aplicar** continua cabendo na coluna mínima.
+
+Os outros dois olham o botão de saída (desabilitado, que é o estado de um `AppState` novo):
+
+- o retângulo desenhado do botão tem cantos com raio de 5;
+- a folga entre o fundo do botão e o fundo da área é de 10 px (± 0,5), e o botão continua com 56 px de altura e a
+  largura da área.
