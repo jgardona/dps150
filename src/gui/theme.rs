@@ -6,6 +6,9 @@ use eframe::egui::Color32;
 pub(crate) const CONTROL_SHARE: f32 = 0.36;
 pub(crate) const CONTROL_MIN_WIDTH: f32 = 330.0;
 pub(crate) const CONTROL_MAX_WIDTH: f32 = 440.0;
+/// Espaço extra entre os grupos da linha de campos do Setpoint: entre o campo V e o rótulo A, e
+/// entre o campo A e o botão Aplicar. Soma-se ao espaçamento padrão entre widgets (de cada lado).
+pub(crate) const FIELD_GAP: f32 = 10.0;
 /// Tamanho do texto do quadro de setup das memórias (título, rótulos, valores e unidades).
 pub(crate) const SETUP_FONT_SIZE: f32 = 16.0;
 /// Largura do seletor de cor da legenda.

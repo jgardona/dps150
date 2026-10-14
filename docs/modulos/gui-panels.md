@@ -72,25 +72,88 @@ aparece na leitura de tensão se a fonte está em `CV` e na de corrente se está
 
 | | |
 |---|---|
-| **Propósito** | Desenhar o card com os campos de tensão e corrente, os botões Aplicar e Desfazer e as memórias M1–M6. |
+| **Propósito** | Desenhar o card com o título, os campos de tensão e corrente com o botão Aplicar, e as memórias M1–M6. |
 | **Entradas** | `ui`: a área. `app`: o estado. `colors`: as cores de V e A para os rótulos dos campos. |
 | **Saída** | nada |
 | **Efeitos** | Conforme o usuário interage: edita o setpoint, aplica, desfaz, carrega uma memória ou salva uma memória. |
 
 **Como funciona**: o card tem quatro partes:
 
-1. **Título** "Setpoint", com o aviso "• não aplicado" quando `setpoint().is_dirty()`.
+1. **Título** (`setpoint_title`): "Setpoint" e, quando `setpoint().is_dirty()`, o aviso "• não aplicado" e o botão **Desfazer**, que chama `discard_setpoint_edits()`.
 2. **Campos**: dois campos numéricos arrastáveis, V (de 0 a 36,00, 2 casas) e A (de 0 a 8,200, 3 casas), com os máximos
    `VSET_MAX` e `ISET_MAX` de [`memory_setup`](logics-memory_setup.md), que editam
    direto `setpoint_mut().vset_input` e `cset_input`. Se algum mudou, chama `mark_setpoint_edited()`. Informa
    a `set_editing(...)` quais campos estão em foco ou sendo arrastados. Se o foco saiu de um campo por causa
-   da tecla **Enter**, guarda isso para o botão Aplicar.
-3. **Botões**: **Aplicar** (habilitado só conectado; azul quando há pendência) chama `apply_setpoints()`, assim
-   como o Enter; **Desfazer** (só aparece com pendência) chama `discard_setpoint_edits()`.
+   da tecla **Enter**, guarda isso para o botão Aplicar. Entre o campo V e o rótulo A há o espaço `FIELD_GAP`.
+3. **Aplicar**, na **mesma linha** dos campos, à direita do campo A e separado dele pelo mesmo `FIELD_GAP`
+   (habilitado só conectado; azul quando há pendência; com a mesma largura do botão **Desfazer**, dada por
+   `action_button_width`): chama `apply_setpoints()`, assim como o Enter. Não há
+   mais uma linha só de botões abaixo dos campos.
 4. **Memórias**: um botão M1 a M6 por grupo. Clicar chama `request_select_memory(n)`, que mostra a memória no
    quadro de setup (veja `setup_card`) e, se há edição pendente, pede confirmação antes de trocar. Ao passar o
    mouse, mostra os valores salvos (ou "sem dados"). **Salvar** chama `save_memory_setup()` e só fica habilitado
    conectado e com os seis valores do quadro válidos; sem isso, a dica mostra o primeiro erro.
+
+### `setpoint_title`
+
+*(interna)*
+
+| | |
+|---|---|
+| **Propósito** | Desenhar a linha do título do card Setpoint: o nome e, com pendência, o aviso "• não aplicado" e o botão Desfazer. |
+| **Entradas** | `ui`: a área. `dirty`: se há alteração de tensão/corrente ainda não enviada. `align_x`: a posição horizontal onde o Desfazer deve começar (a do botão Aplicar), se conhecida. |
+| **Saída** | A resposta do botão Desfazer (`Some` só com pendência); quem chama vê se ele foi clicado. |
+| **Efeitos** | nenhum além de desenhar; quem descarta a edição é quem chama |
+
+**Como funciona**: desenha "Setpoint" em destaque e, só com `dirty`, o aviso e o botão **Desfazer**. O aviso e o
+botão ficam nesta linha, que existe com ou sem pendência, e não numa linha extra: assim o card não muda de altura
+quando a pendência aparece e some. Para garantir isso, a linha tem a altura mínima de um botão (o texto do botão
+arredondado para cima, mais o preenchimento): sem isso, a linha só com o texto seria uns 0,3 px mais baixa que a
+com botão, e o que vem abaixo daria um pequeno salto.
+
+**Alinhamento com o Aplicar:** depois do aviso, se `align_x` é conhecido e fica à direita do fim do aviso, a função
+acrescenta o espaço que falta para o **Desfazer** começar exatamente em `align_x`, de modo que ele fique na mesma
+posição horizontal do botão **Aplicar** da linha de baixo. Se o aviso já passou dessa posição, o botão vem logo
+depois dele.
+
+**Exemplo:** o Aplicar começa em x = 250 e o aviso termina em x = 170: a função põe o espaço que falta e o Desfazer
+começa em 250. Se o Aplicar começasse em x = 150, o Desfazer ficaria logo depois do aviso.
+
+### `action_button_width`
+
+*(interna)*
+
+| | |
+|---|---|
+| **Propósito** | Dar a largura comum dos botões Aplicar e Desfazer. |
+| **Entradas** | `ui`: a área (para medir o texto na fonte do botão e ler o preenchimento). |
+| **Saída** | A largura, em pontos. |
+| **Efeitos** | nenhum |
+
+**Como funciona**: mede os textos "Aplicar" e "Desfazer" na fonte de botão da interface, fica com o maior e soma o
+preenchimento horizontal do botão nos dois lados. Os dois botões usam esse valor como largura **mínima**, então têm
+o mesmo tamanho e o texto de cada um fica centralizado. Como o valor sai da medida do texto, e não de um número
+fixo, continua certo se a fonte ou os textos mudarem.
+
+**Exemplo:** "Desfazer" é mais largo que "Aplicar" na Noto Sans de 14 px. Com "Desfazer" medindo 52 e preenchimento
+de 4 de cada lado, a largura comum é 60: o **Aplicar** cresce até 60 e o **Desfazer** continua com 60.
+
+### `apply_button_x_id`
+
+*(interna)*
+
+| | |
+|---|---|
+| **Propósito** | Dar o identificador sob o qual se guarda a posição horizontal do botão Aplicar. |
+| **Entradas** | nenhuma |
+| **Saída** | Um `egui::Id` fixo. |
+| **Efeitos** | nenhum |
+
+**Como funciona**: cria o `Id` a partir do texto `"setpoint_apply_button_x"`. `setpoint_card` guarda nele, na memória
+temporária do egui, onde o **Aplicar** começou, e lê o valor do quadro anterior para alinhar o **Desfazer** (que é
+desenhado antes, na linha de cima). Como o **Aplicar** é desenhado a cada quadro, o valor sempre existe depois do
+primeiro. Se o **Aplicar** andar (a largura dos campos mudou), `setpoint_card` pede mais um quadro de redesenho
+para o **Desfazer** se acertar sem depender de um evento do usuário.
 
 ### `setup_card`
 
@@ -146,3 +209,16 @@ de altura, e só é habilitado quando conectado. Clicar chama `app.toggle_output
 **Como funciona**: mostra, separados por traços, a **capacidade** (Ah, 3 casas) e a **energia** (Wh, 2 casas),
 que vêm da própria fonte, e o **tempo** com a saída ligada, que o programa mede: `app.current_elapsed(now)`
 formatado por `format_hhmmss`.
+
+## Testes
+
+Sete testes, sem janela, medem o texto em Noto Sans no corpo padrão da interface:
+
+- a linha V + A + **Aplicar**, com os valores máximos (36,00 V e 8,200 A), cabe na largura mínima da coluna de
+  controle (330 px), contando o preenchimento, o espaçamento entre widgets, o `FIELD_GAP` e as margens do card;
+- a linha do título com "Setpoint", "• não aplicado" e **Desfazer** cabe na mesma largura;
+- a linha do título tem a mesma altura com e sem pendência, então o card não muda de altura;
+- o **Desfazer** começa exatamente na posição horizontal pedida (a do **Aplicar**);
+- se o **Aplicar** estiver mais à esquerda que o fim do aviso, o **Desfazer** vem logo depois do aviso;
+- a largura do **Desfazer** é a largura comum dos dois botões, e essa largura é a do texto mais largo ("Desfazer") mais o
+  preenchimento. O **Aplicar** usa o mesmo valor, e a linha V + A + **Aplicar** continua cabendo na coluna mínima.

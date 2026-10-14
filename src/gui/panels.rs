@@ -1,7 +1,7 @@
 //! Barra superior, coluna de controle e barra inferior.
 
 use super::{
-    theme::{ACTION_COLOR, ERROR_COLOR, OK_COLOR, SETUP_FONT_SIZE, WARN_COLOR},
+    theme::{ACTION_COLOR, ERROR_COLOR, FIELD_GAP, OK_COLOR, SETUP_FONT_SIZE, WARN_COLOR},
     widgets::{ReadoutRow, card, info_pair, setup_field, status_dot},
 };
 use crate::logics::{
@@ -120,14 +120,69 @@ fn readouts(ui: &mut egui::Ui, app: &AppState, colors: &[Color32; 3]) {
     });
 }
 
+/// Linha do título do card Setpoint: "Setpoint" e, com pendência, o aviso e o botão Desfazer.
+/// Devolve a resposta do Desfazer (`Some` só com pendência).
+///
+/// O aviso e o botão vivem na linha do título, que existe com ou sem pendência. A altura mínima
+/// da linha é a de um botão, para o card não crescer quando a pendência aparece e some.
+///
+/// `align_x` é a posição horizontal (em pontos da tela) onde o Desfazer deve começar: a do botão
+/// Aplicar, na linha de baixo, para os dois ficarem alinhados. Se o aviso já passou dessa posição,
+/// o botão vem logo depois dele.
+fn setpoint_title(ui: &mut egui::Ui, dirty: bool, align_x: Option<f32>) -> Option<egui::Response> {
+    ui.horizontal(|ui| {
+        let button_height =
+            ui.text_style_height(&egui::TextStyle::Button) + 2.0 * ui.spacing().button_padding.y;
+        // O botão arredonda a altura do texto para cima; sem isso a linha cresceria uns 0,3 px.
+        ui.set_min_height(button_height.ceil().max(ui.spacing().interact_size.y));
+        ui.label(egui::RichText::new("Setpoint").strong());
+        if !dirty {
+            return None;
+        }
+        ui.colored_label(WARN_COLOR, "\u{2022} não aplicado");
+        if let Some(x) = align_x {
+            // `next_widget_position` já inclui o espaçamento que o egui põe antes do próximo item,
+            // e o `add_space` não o repete: a distância que falta é exatamente esta (conferido
+            // pelo teste `desfazer_comeca_na_posicao_do_aplicar`).
+            let gap = x - ui.next_widget_position().x;
+            if gap > 0.0 {
+                ui.add_space(gap);
+            }
+        }
+        let width = action_button_width(ui);
+        Some(ui.add(egui::Button::new("Desfazer").min_size(egui::vec2(width, 0.0))))
+    })
+    .inner
+}
+
+/// Largura comum dos botões Aplicar e Desfazer: a do mais largo dos dois textos, com o preenchimento
+/// do botão. Os dois usam essa largura mínima para ficarem do mesmo tamanho, qualquer que seja a
+/// fonte, em vez de um número fixo.
+fn action_button_width(ui: &egui::Ui) -> f32 {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let text_width = |text: &str| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font.clone(), Color32::WHITE)
+            .size()
+            .x
+    };
+    text_width("Aplicar").max(text_width("Desfazer")) + 2.0 * ui.spacing().button_padding.x
+}
+
+/// Onde o botão Aplicar começou no quadro anterior (guardado na memória temporária do egui).
+fn apply_button_x_id() -> egui::Id {
+    egui::Id::new("setpoint_apply_button_x")
+}
+
 fn setpoint_card(ui: &mut egui::Ui, app: &mut AppState, colors: &[Color32; 3]) {
     card(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Setpoint").strong());
-            if app.setpoint().is_dirty() {
-                ui.colored_label(WARN_COLOR, "\u{2022} não aplicado");
-            }
-        });
+        // O Desfazer se alinha ao Aplicar, que fica na linha de baixo: usa a posição dele no
+        // quadro anterior (o Aplicar é desenhado a cada quadro, então ela sempre existe).
+        let apply_x_known = ui.data(|d| d.get_temp::<f32>(apply_button_x_id()));
+        let undo = setpoint_title(ui, app.setpoint().is_dirty(), apply_x_known);
+        if undo.is_some_and(|r| r.clicked()) {
+            app.discard_setpoint_edits();
+        }
 
         let mut enter_pressed = false;
         ui.horizontal(|ui| {
@@ -139,7 +194,7 @@ fn setpoint_card(ui: &mut egui::Ui, app: &mut AppState, colors: &[Color32; 3]) {
                     .fixed_decimals(2)
                     .suffix(" V"),
             );
-            ui.add_space(10.0);
+            ui.add_space(FIELD_GAP);
             ui.label(egui::RichText::new("A").color(colors[1]).strong());
             let c_resp = ui.add(
                 egui::DragValue::new(&mut app.setpoint_mut().cset_input)
@@ -158,29 +213,34 @@ fn setpoint_card(ui: &mut egui::Ui, app: &mut AppState, colors: &[Color32; 3]) {
             );
             enter_pressed = (v_resp.lost_focus() || c_resp.lost_focus())
                 && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        });
 
-        ui.horizontal(|ui| {
+            // Mesmo espaço que separa o campo V do rótulo A.
+            ui.add_space(FIELD_GAP);
             let dirty = app.setpoint().is_dirty();
             let apply = egui::Button::new(
                 egui::RichText::new("Aplicar")
                     .color(Color32::BLACK)
                     .strong(),
             )
+            .min_size(egui::vec2(action_button_width(ui), 0.0))
             .fill(if dirty {
                 ACTION_COLOR
             } else {
                 Color32::from_gray(90)
             });
-            let clicked = ui
+            let apply_resp = ui
                 .add_enabled(app.is_connected(), apply)
-                .on_hover_text("Envia Vset/Iset ao aparelho (ou Enter)")
-                .clicked();
+                .on_hover_text("Envia Vset/Iset ao aparelho (ou Enter)");
+            let apply_x = apply_resp.rect.left();
+            // Se o Aplicar andou (a largura dos campos mudou), o Desfazer usou a posição velha neste
+            // quadro: pede mais um quadro para ele se alinhar mesmo sem nenhum evento do usuário.
+            if apply_x_known.is_none_or(|old| (old - apply_x).abs() > 0.5) {
+                ui.ctx().request_repaint();
+            }
+            ui.data_mut(|d| d.insert_temp(apply_button_x_id(), apply_x));
+            let clicked = apply_resp.clicked();
             if clicked || (enter_pressed && app.is_connected()) {
                 app.apply_setpoints();
-            }
-            if app.setpoint().is_dirty() && ui.button("Desfazer").clicked() {
-                app.discard_setpoint_edits();
             }
         });
 
@@ -384,4 +444,156 @@ pub(crate) fn bottom_bar(ui: &mut egui::Ui, app: &AppState, now: Instant) {
         ui.separator();
         info_pair(ui, "Tempo", &format_hhmmss(app.current_elapsed(now)));
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gui::theme::{CONTROL_MIN_WIDTH, FIELD_GAP};
+    use eframe::egui::TextStyle;
+
+    /// Larguras dos textos no corpo padrão da interface, com a Noto Sans instalada, mais o
+    /// espaçamento entre widgets e o preenchimento dos botões e campos do estilo padrão.
+    struct Metrics {
+        widths: Vec<f32>,
+        item_spacing: f32,
+        button_padding: f32,
+    }
+
+    fn measure(texts: &[&str]) -> Metrics {
+        let ctx = egui::Context::default();
+        crate::gui::install_fonts(&ctx);
+        let mut widths = Vec::new();
+        let (mut item_spacing, mut button_padding) = (0.0, 0.0);
+        // Duas passagens: a fonte nova só vale a partir do quadro seguinte ao `set_fonts`.
+        for _ in 0..2 {
+            widths.clear();
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let font = TextStyle::Body.resolve(ui.style());
+                item_spacing = ui.spacing().item_spacing.x;
+                button_padding = ui.spacing().button_padding.x;
+                for text in texts {
+                    let galley = ui.painter().layout_no_wrap(
+                        (*text).to_owned(),
+                        font.clone(),
+                        Color32::WHITE,
+                    );
+                    widths.push(galley.size().x);
+                }
+            });
+        }
+        Metrics {
+            widths,
+            item_spacing,
+            button_padding,
+        }
+    }
+
+    /// Margens internas do card (de cada lado).
+    const CARD_MARGIN: f32 = 8.0;
+
+    #[test]
+    fn linha_v_a_aplicar_cabe_na_coluna_minima() {
+        // Valores máximos: 36,00 V e 8,200 A.
+        let m = measure(&["V", "36.00 V", "A", "8.200 A", "Aplicar", "Desfazer"]);
+        let w = &m.widths;
+        let (sp, bp) = (m.item_spacing, m.button_padding);
+        let gap = sp + FIELD_GAP + sp;
+        let total = w[0] + sp + (w[1] + 2.0 * bp) // V e o campo
+            + gap
+            + w[2] + sp + (w[3] + 2.0 * bp) // A e o campo
+            + gap
+            + (w[4].max(w[5]) + 2.0 * bp) // botão Aplicar, do mesmo tamanho do Desfazer
+            + 2.0 * CARD_MARGIN;
+        assert!(total <= CONTROL_MIN_WIDTH, "{total} > {CONTROL_MIN_WIDTH}");
+    }
+
+    /// Altura da linha do título do Setpoint, com ou sem pendência.
+    fn title_height(dirty: bool) -> f32 {
+        let ctx = egui::Context::default();
+        crate::gui::install_fonts(&ctx);
+        let mut height = 0.0;
+        for _ in 0..2 {
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let top = ui.cursor().top();
+                setpoint_title(ui, dirty, None);
+                height = ui.cursor().top() - top;
+            });
+        }
+        height
+    }
+
+    #[test]
+    fn linha_do_titulo_tem_a_mesma_altura_com_e_sem_pendencia() {
+        let (sem, com) = (title_height(false), title_height(true));
+        assert!(sem > 0.0);
+        assert!((sem - com).abs() < 0.01, "{sem} != {com}");
+    }
+
+    #[test]
+    fn titulo_com_aviso_e_desfazer_cabe_na_coluna_minima() {
+        let m = measure(&["Setpoint", "\u{2022} não aplicado", "Desfazer"]);
+        let w = &m.widths;
+        let (sp, bp) = (m.item_spacing, m.button_padding);
+        let total = w[0] + sp + w[1] + sp + (w[2] + 2.0 * bp) + 2.0 * CARD_MARGIN;
+        assert!(total <= CONTROL_MIN_WIDTH, "{total} > {CONTROL_MIN_WIDTH}");
+    }
+
+    /// Posição horizontal do Desfazer, pedindo para ele começar em `align_x`.
+    fn undo_left(align_x: Option<f32>) -> f32 {
+        let ctx = egui::Context::default();
+        crate::gui::install_fonts(&ctx);
+        let mut left = 0.0;
+        for _ in 0..2 {
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                left = setpoint_title(ui, true, align_x).map_or(0.0, |button| button.rect.left());
+            });
+        }
+        left
+    }
+
+    #[test]
+    fn desfazer_comeca_na_posicao_do_aplicar() {
+        // Uma posição bem à direita do aviso: o Desfazer deve começar exatamente nela.
+        let alvo = 250.0;
+        assert!((undo_left(Some(alvo)) - alvo).abs() < 0.01);
+    }
+
+    #[test]
+    fn desfazer_vem_depois_do_aviso_se_o_aplicar_estiver_mais_a_esquerda() {
+        let natural = undo_left(None);
+        assert!((undo_left(Some(natural - 40.0)) - natural).abs() < 0.01);
+    }
+
+    /// Largura do botão Desfazer e a largura comum dos dois botões.
+    fn undo_and_common_width() -> (f32, f32) {
+        let ctx = egui::Context::default();
+        crate::gui::install_fonts(&ctx);
+        let (mut undo, mut common) = (0.0, 0.0);
+        for _ in 0..2 {
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                common = action_button_width(ui);
+                undo = setpoint_title(ui, true, None).map_or(0.0, |b| b.rect.width());
+            });
+        }
+        (undo, common)
+    }
+
+    #[test]
+    fn desfazer_tem_a_largura_comum_dos_dois_botoes() {
+        let (undo, common) = undo_and_common_width();
+        assert!(common > 0.0);
+        assert!((undo - common).abs() < 0.01, "{undo} != {common}");
+    }
+
+    #[test]
+    fn largura_comum_comporta_o_texto_mais_largo() {
+        let m = measure(&["Aplicar", "Desfazer"]);
+        let (_, common) = undo_and_common_width();
+        let mais_largo = m.widths[0].max(m.widths[1]) + 2.0 * m.button_padding;
+        assert!(
+            (common - mais_largo).abs() < 0.01,
+            "{common} != {mais_largo}"
+        );
+    }
 }

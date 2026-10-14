@@ -105,7 +105,8 @@ O **modo de regulação** aparece como um selo na leitura correspondente:
 O card **Setpoint** define a tensão (**V**, de 0 a 36,00 V) e o limite de corrente (**A**, de 0 a 8,200 A) da saída.
 
 - Para mudar um valor, arraste o campo com o mouse ou clique nele e digite.
-- Valores editados e ainda não enviados mostram o aviso **"• não aplicado"**. Enquanto o aviso estiver aparecendo, os campos param de acompanhar o valor lido do aparelho, para não apagar o que você digitou.
+- Os campos **V** e **A** e o botão **Aplicar** ficam na mesma linha, com o mesmo espaço entre eles.
+- Valores editados e ainda não enviados mostram o aviso **"• não aplicado"**. Enquanto o aviso estiver aparecendo, os campos param de acompanhar o valor lido do aparelho, para não apagar o que você digitou. O botão **Desfazer** aparece ao lado do aviso, no título do card, e o card não muda de altura quando eles aparecem ou somem. O **Desfazer** começa na mesma posição horizontal do botão **Aplicar**, na linha de baixo, e os dois botões têm a mesma largura.
 - **Aplicar** (ou **Enter** no campo) envia tensão e corrente ao aparelho. O botão fica azul quando há alteração pendente.
 - **Desfazer** descarta a edição e volta aos valores atuais do aparelho.
 
